@@ -1,0 +1,27 @@
+database:
+  url: "sqlite+aiosqlite:///./data/dns2bgp.db"
+
+dns:
+  nameservers: []
+  timeout: 3.0
+
+refresh:
+  max_interval: 86400
+  min_interval: 60
+
+bird:
+  include_path: "./data/dns2bgp.routes"
+  protocol_name: dns2bgp
+  table: master4
+  nexthop: "wg0"
+  birdc_enable: false
+  birdc_bin: birdc
+
+web:
+  host: "127.0.0.1"
+  port: 8080
+  api_key: "change-me"
+
+telegram:
+  token: ""
+  allowed_user_ids: []

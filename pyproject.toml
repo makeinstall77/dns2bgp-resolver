@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dns2bgp-resolver"
+version = "0.1.0"
+description = "Resolve domains into a BGP route pool for VPN traffic steering"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiogram>=3.13",
+    "dnspython>=2.6",
+    "fastapi>=0.115",
+    "pydantic-settings>=2.5",
+    "pyyaml>=6.0",
+    "sqlalchemy[asyncio]>=2.0",
+    "aiosqlite>=0.20",
+    "typer>=0.12",
+    "uvicorn[standard]>=0.30",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+postgres = ["asyncpg>=0.29"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+dns2bgp = "dns2bgp_resolver.interfaces.cli.app:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dns2bgp_resolver"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/dns2bgp_resolver/interfaces/web/templates" = "dns2bgp_resolver/interfaces/web/templates"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["src"]
