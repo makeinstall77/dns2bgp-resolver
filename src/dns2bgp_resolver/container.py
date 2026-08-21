@@ -44,7 +44,9 @@ class AppContainer:
             if not db_path.is_absolute():
                 db_path = Path.cwd() / db_path
             db_path.parent.mkdir(parents=True, exist_ok=True)
-        Path(self.settings.bird.include_path).parent.mkdir(parents=True, exist_ok=True)
+        bird_dir = Path(self.settings.bird.include_path).parent
+        bird_dir.mkdir(parents=True, exist_ok=True)
+        bird_dir.chmod(0o755)
         await self.repository.initialize()
 
     async def shutdown(self) -> None:

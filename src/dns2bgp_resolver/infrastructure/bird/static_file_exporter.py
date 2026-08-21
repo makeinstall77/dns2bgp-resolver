@@ -65,6 +65,7 @@ class StaticFileBirdExporter(RouteExporter):
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(path.parent, 0o755)
         fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -72,6 +73,7 @@ class StaticFileBirdExporter(RouteExporter):
                 fh.flush()
                 os.fsync(fh.fileno())
             os.replace(tmp_name, path)
+            os.chmod(path, 0o664)
         except Exception:
             try:
                 os.unlink(tmp_name)
