@@ -173,7 +173,9 @@ async def test_bird_exporter_ip_nexthop(tmp_path: Path):
         BirdSettings(include_path=str(path), nexthop="10.0.0.1", birdc_enable=False)
     )
     await exporter.export(["1.1.1.1/32"])
-    assert "via 10.0.0.1;" in path.read_text(encoding="utf-8")
+    assert "route 1.1.1.1/32 reject;" in path.read_text(encoding="utf-8")
+    assert (path.stat().st_mode & 0o777) == 0o664
+    assert (path.parent.stat().st_mode & 0o777) == 0o755
 
 
 @pytest.mark.asyncio
