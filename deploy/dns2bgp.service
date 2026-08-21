@@ -1,0 +1,17 @@
+[Unit]
+Description=dns2bgp-resolver (DNS → BGP pool for VPN steering)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dns2bgp
+Group=dns2bgp
+WorkingDirectory=/var/lib/dns2bgp
+ExecStart=/opt/dns2bgp/.venv/bin/dns2bgp --config /etc/dns2bgp/config.yaml serve
+Restart=on-failure
+RestartSec=5
+# Bird include file should live on disk bird can read independently of this unit.
+
+[Install]
+WantedBy=multi-user.target
