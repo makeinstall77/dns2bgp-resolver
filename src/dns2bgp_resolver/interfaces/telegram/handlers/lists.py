@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, Message
 
 from dns2bgp_resolver.application.commands import (
     AddDomainListCommand,
@@ -13,6 +13,7 @@ from dns2bgp_resolver.application.commands import (
     SyncDomainListCommand,
     UpdateDomainListCommand,
 )
+from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
 from dns2bgp_resolver.interfaces.telegram.keyboards import (
     BTN_CANCEL,
