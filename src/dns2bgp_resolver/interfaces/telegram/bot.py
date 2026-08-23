@@ -3,14 +3,24 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable
 
-from aiogram import BaseMiddleware, Bot, Dispatcher
+from aiogram import BaseMiddleware, Bot, Dispatcher, F
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Message, TelegramObject
 
 from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
 from dns2bgp_resolver.interfaces.telegram.handlers import auto, lists, manual, menu, settings
-from dns2bgp_resolver.interfaces.telegram.keyboards import main_menu_keyboard
+from dns2bgp_resolver.interfaces.telegram.keyboards import (
+    BTN_AUTO,
+    BTN_CANCEL,
+    BTN_DOMAINS,
+    BTN_LISTS,
+    BTN_RESOLVE,
+    BTN_SETTINGS,
+    main_menu_keyboard,
+)
+
+_MENU_BUTTONS = {BTN_DOMAINS, BTN_AUTO, BTN_LISTS, BTN_SETTINGS, BTN_RESOLVE, BTN_CANCEL}
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +54,7 @@ async def run_telegram_bot(container: AppContainer) -> None:
     dp.include_router(lists.router)
     dp.include_router(settings.router)
 
-    from aiogram import F
-
-    @dp.message(F.text)
+    @dp.message(F.text & ~F.text.in_(_MENU_BUTTONS))
     async def fallback(message: Message, container: AppContainer) -> None:
         if not allowed(container, message.from_user.id if message.from_user else None):
             return

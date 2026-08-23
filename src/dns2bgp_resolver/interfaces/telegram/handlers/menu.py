@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -36,29 +36,29 @@ async def cmd_start(message: Message, container: AppContainer) -> None:
     )
 
 
-@router.message(lambda m: m.text == BTN_DOMAINS)
+@router.message(F.text == BTN_DOMAINS)
 async def btn_domains(message: Message) -> None:
     await message.answer("Manual domains:", reply_markup=domains_menu())
 
 
-@router.message(lambda m: m.text == BTN_AUTO)
+@router.message(F.text == BTN_AUTO)
 async def btn_auto(message: Message) -> None:
     await message.answer("Auto domains:", reply_markup=auto_menu())
 
 
-@router.message(lambda m: m.text == BTN_LISTS)
+@router.message(F.text == BTN_LISTS)
 async def btn_lists(message: Message, container: AppContainer) -> None:
     text, markup = await lists_handlers.render_lists_menu(container)
     await message.answer(text, reply_markup=markup)
 
 
-@router.message(lambda m: m.text == BTN_SETTINGS)
+@router.message(F.text == BTN_SETTINGS)
 async def btn_settings(message: Message, container: AppContainer) -> None:
     text = await settings_handlers.render_settings_summary(container)
     await message.answer(text, reply_markup=settings_menu())
 
 
-@router.message(lambda m: m.text == BTN_RESOLVE)
+@router.message(F.text == BTN_RESOLVE)
 async def btn_resolve(message: Message, container: AppContainer) -> None:
     from dns2bgp_resolver.application.commands import ResolveNowCommand
 
@@ -76,7 +76,7 @@ async def btn_resolve(message: Message, container: AppContainer) -> None:
     await message.answer("\n".join(lines) or "Nothing to resolve.")
 
 
-@router.callback_query(lambda c: c.data == "m:main")
+@router.callback_query(F.data == "m:main")
 async def cb_main(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     if callback.message:
@@ -84,7 +84,7 @@ async def cb_main(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data == "m:domains")
+@router.callback_query(F.data == "m:domains")
 async def cb_domains(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     if callback.message:
@@ -92,7 +92,7 @@ async def cb_domains(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data == "m:auto")
+@router.callback_query(F.data == "m:auto")
 async def cb_auto(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     if callback.message:
@@ -100,7 +100,7 @@ async def cb_auto(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data == "m:lists")
+@router.callback_query(F.data == "m:lists")
 async def cb_lists(callback: CallbackQuery, container: AppContainer, state: FSMContext) -> None:
     await state.clear()
     text, markup = await lists_handlers.render_lists_menu(container)
@@ -109,7 +109,7 @@ async def cb_lists(callback: CallbackQuery, container: AppContainer, state: FSMC
     await callback.answer()
 
 
-@router.callback_query(lambda c: c.data == "m:settings")
+@router.callback_query(F.data == "m:settings")
 async def cb_settings(callback: CallbackQuery, container: AppContainer, state: FSMContext) -> None:
     await state.clear()
     text = await settings_handlers.render_settings_summary(container)
