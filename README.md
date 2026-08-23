@@ -87,7 +87,7 @@ include "/var/lib/dns2bgp/dns2bgp.routes";
 
 See [deploy/bird.include.example.conf](deploy/bird.include.example.conf) and [deploy/dns2bgp.service](deploy/dns2bgp.service).
 
-Set `bird.include_path` and optionally `bird.birdc_enable: true` in `config.yaml`. `birdc configure` is best-effort and never fails the export.
+Set `bird.include_path` and optionally `bird.birdc_enable: true` in `config.yaml`. After each export the service runs `birdc configure` (best-effort; export never fails because of bird). The `dns2bgp` user must be in the `bird` group to access the control socket (`birdc_socket`, default `/run/bird/bird.ctl`); the deb package adds this automatically.
 
 ## Web & Telegram
 

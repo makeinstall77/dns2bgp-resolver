@@ -81,11 +81,17 @@ class StaticFileBirdExporter(RouteExporter):
                 pass
             raise
 
+    def _birdc_cmd(self, *args: str) -> list[str]:
+        cmd = [self._settings.birdc_bin]
+        if self._settings.birdc_socket:
+            cmd.extend(["-s", self._settings.birdc_socket])
+        cmd.extend(args)
+        return cmd
+
     async def _reload_bird(self) -> None:
         try:
             proc = await asyncio.create_subprocess_exec(
-                self._settings.birdc_bin,
-                "configure",
+                *self._birdc_cmd("configure"),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
