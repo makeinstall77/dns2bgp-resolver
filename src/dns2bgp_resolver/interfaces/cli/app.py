@@ -9,16 +9,28 @@ import typer
 
 from dns2bgp_resolver.application.commands import (
     AddDomainCommand,
+    AddDomainListCommand,
+    ClearDomainListCommand,
     ExportRoutesCommand,
+    GetSettingsCommand,
+    ListDomainListsCommand,
     ListDomainsCommand,
     RemoveDomainCommand,
+    RemoveDomainListCommand,
     ResolveNowCommand,
+    SetDefaultSyncIntervalCommand,
     SyncAutoListCommand,
+    SyncDomainListCommand,
+    UpdateDomainListCommand,
 )
 from dns2bgp_resolver.config import Settings
 from dns2bgp_resolver.container import AppContainer, build_container
 
 app = typer.Typer(name="dns2bgp", help="DNS → BGP pool resolver for VPN traffic steering", no_args_is_help=True)
+lists_app = typer.Typer(name="lists", help="Manage domain lists")
+settings_app = typer.Typer(name="settings", help="Runtime settings")
+app.add_typer(lists_app)
+app.add_typer(settings_app)
 logger = logging.getLogger(__name__)
 
 
@@ -155,7 +167,7 @@ def export_routes(ctx: typer.Context) -> None:
 
 @app.command("sync-auto")
 def sync_auto(ctx: typer.Context) -> None:
-    """Download and sync auto domain list from antifilter."""
+    """Sync all enabled domain lists."""
 
     async def _action(container: AppContainer):
         result = await container.bus.execute(SyncAutoListCommand())
@@ -170,6 +182,168 @@ def sync_auto(ctx: typer.Context) -> None:
             )
         else:
             typer.echo(result.message)
+
+    _run(_with_container(ctx.obj["config"], _action))
+
+
+@lists_app.command("show")
+def lists_show(ctx: typer.Context) -> None:
+    """List configured domain lists."""
+
+    async def _action(container: AppContainer):
+        result = await container.bus.execute(ListDomainListsCommand())
+        settings = await container.bus.execute(GetSettingsCommand())
+        if not result.ok:
+            typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        default = settings.data.default_sync_interval if settings.data else 86400
+        items = result.data or []
+        if not items:
+            typer.echo(f"(no lists, default interval={default}s)")
+            return
+        for item in items:
+            state = "on" if item.enabled else "off"
+            interval = item.sync_interval or default
+            src = item.url if item.type == "url" else "file"
+            typer.echo(f"[{item.id}] {item.name}\t{item.type}\t{state}\t{interval}s\t{src}")
+
+    _run(_with_container(ctx.obj["config"], _action))
+
+
+@lists_app.command("add-url")
+def lists_add_url(
+    ctx: typer.Context,
+    url: str = typer.Argument(...),
+    name: str = typer.Option("", "--name", "-n"),
+    interval: Optional[int] = typer.Option(None, "--interval", "-i"),
+) -> None:
+    async def _action(container: AppContainer):
+        list_name = name.strip() or url.rsplit("/", 1)[-1]
+        result = await container.bus.execute(
+            AddDomainListCommand(name=list_name, type="url", url=url, sync_interval=interval)
+        )
+        if not result.ok:
+            typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        typer.echo(result.message)
+
+    _run(_with_container(ctx.obj["config"], _action))
+
+
+@lists_app.command("add-file")
+def lists_add_file(
+    ctx: typer.Context,
+    path: Path = typer.Argument(...),
+    name: str = typer.Option("", "--name", "-n"),
+) -> None:
+    async def _action(container: AppContainer):
+        content = path.read_text(encoding="utf-8")
+        list_name = name.strip() or path.stem
+        result = await container.bus.execute(
+            AddDomainListCommand(name=list_name, type="file", file_content=content)
+        )
+        if not result.ok:
+            typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        typer.echo(result.message)
+
+    _run(_with_container(ctx.obj["config"], _action))
+
+
+@lists_app.command("enable")
+def lists_enable(ctx: typer.Context, list_id: int = typer.Argument(...)) -> None:
+    async def _action(container: AppContainer):
+        result = await container.bus.execute(UpdateDomainListCommand(id=list_id, enabled=True))
+        if not result.ok:
+            typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        typer.echo(result.message)
+
+    _run(_with_container(ctx.obj["config"], _action))
+
+
+@lists_app.command("disable")
+def lists_disable(ctx: typer.Context, list_id: int = typer.Argument(...)) -> None:
+    async def _action(container: AppContainer):
+        result = await container.bus.execute(UpdateDomainListCommand(id=list_id, enabled=False))
+        if not result.ok:
+            typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        typer.echo(result.message)
+
+    _run(_with_container(ctx.obj["config"], _action))
+
+
+@lists_app.command("clear")
+def lists_clear(ctx: typer.Context, list_id: int = typer.Argument(...)) -> None:
+    async def _action(container: AppContainer):
+        result = await container.bus.execute(ClearDomainListCommand(id=list_id))
+        if not result.ok:
+            typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        typer.echo(result.message)
+
+    _run(_with_container(ctx.obj["config"], _action))
+
+
+@lists_app.command("remove")
+def lists_remove(ctx: typer.Context, list_id: int = typer.Argument(...)) -> None:
+    async def _action(container: AppContainer):
+        result = await container.bus.execute(RemoveDomainListCommand(id=list_id))
+        if not result.ok:
+            typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        typer.echo(result.message)
+
+    _run(_with_container(ctx.obj["config"], _action))
+
+
+@lists_app.command("sync")
+def lists_sync(
+    ctx: typer.Context,
+    list_id: Optional[int] = typer.Argument(None),
+) -> None:
+    async def _action(container: AppContainer):
+        result = await container.bus.execute(SyncDomainListCommand(id=list_id))
+        if not result.ok:
+            typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        data = result.data
+        if data:
+            typer.echo(
+                f"sync: added={data.added} removed={data.removed} "
+                f"skipped_manual={data.skipped_manual}"
+            )
+        else:
+            typer.echo(result.message)
+
+    _run(_with_container(ctx.obj["config"], _action))
+
+
+@settings_app.command("sync-interval")
+def settings_sync_interval(
+    ctx: typer.Context,
+    seconds: int = typer.Argument(..., min=60),
+) -> None:
+    async def _action(container: AppContainer):
+        result = await container.bus.execute(SetDefaultSyncIntervalCommand(seconds=seconds))
+        if not result.ok:
+            typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        typer.echo(result.message)
+
+    _run(_with_container(ctx.obj["config"], _action))
+
+
+@settings_app.command("show")
+def settings_show(ctx: typer.Context) -> None:
+    async def _action(container: AppContainer):
+        result = await container.bus.execute(GetSettingsCommand())
+        if not result.ok:
+            typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        assert result.data is not None
+        typer.echo(f"default_sync_interval={result.data.default_sync_interval}")
 
     _run(_with_container(ctx.obj["config"], _action))
 

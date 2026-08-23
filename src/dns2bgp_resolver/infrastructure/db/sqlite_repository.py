@@ -9,12 +9,21 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from dns2bgp_resolver.application.errors import DomainAlreadyExistsError
-from dns2bgp_resolver.application.ports.repository import AutoSyncResult, DomainRepository
-from dns2bgp_resolver.domain import Domain, DomainName, IpAddress, ResolvedAddress
+from dns2bgp_resolver.application.ports.repository import (
+    AutoSyncResult,
+    DEFAULT_SYNC_INTERVAL_KEY,
+    DEFAULT_SYNC_INTERVAL_SECONDS,
+    DomainListCreate,
+    DomainListUpdate,
+    DomainRepository,
+)
+from dns2bgp_resolver.domain import Domain, DomainList, DomainName, IpAddress, ResolvedAddress
 from dns2bgp_resolver.infrastructure.db.models import (
     AddressRow,
+    AppSettingRow,
     AutoExcludeKeywordRow,
     Base,
+    DomainListRow,
     DomainRow,
 )
 
@@ -37,6 +46,7 @@ def _row_to_domain(row: DomainRow) -> Domain:
         id=row.id,
         name=DomainName(row.name),
         source=row.source,  # type: ignore[arg-type]
+        list_id=row.list_id,
         enabled=row.enabled,
         created_at=_ensure_aware(row.created_at),
         next_resolve_at=_ensure_aware(row.next_resolve_at),
@@ -45,6 +55,20 @@ def _row_to_domain(row: DomainRow) -> Domain:
         addresses=[
             ResolvedAddress(ip=IpAddress(a.ip), ttl_seconds=a.ttl_seconds) for a in row.addresses
         ],
+    )
+
+
+def _row_to_domain_list(row: DomainListRow) -> DomainList:
+    return DomainList(
+        id=row.id,
+        name=row.name,
+        type=row.type,  # type: ignore[arg-type]
+        url=row.url,
+        file_content=row.file_content,
+        enabled=row.enabled,
+        sync_interval=row.sync_interval,
+        last_sync_at=_ensure_aware(row.last_sync_at),
+        created_at=_ensure_aware(row.created_at),
     )
 
 
@@ -86,6 +110,11 @@ class SqlAlchemyDomainRepository(DomainRepository):
                     await conn.execute(
                         text("CREATE INDEX IF NOT EXISTS ix_domains_source ON domains (source)")
                     )
+                if "list_id" not in columns:
+                    await conn.execute(text("ALTER TABLE domains ADD COLUMN list_id INTEGER"))
+                    await conn.execute(
+                        text("CREATE INDEX IF NOT EXISTS ix_domains_list_id ON domains (list_id)")
+                    )
                 await self._configure_sqlite(conn)
             elif conn.dialect.name == "postgresql":
                 result = await conn.execute(
@@ -101,6 +130,14 @@ class SqlAlchemyDomainRepository(DomainRepository):
                             "NOT NULL DEFAULT 'manual'"
                         )
                     )
+                result = await conn.execute(
+                    text(
+                        "SELECT 1 FROM information_schema.columns "
+                        "WHERE table_name = 'domains' AND column_name = 'list_id'"
+                    )
+                )
+                if result.fetchone() is None:
+                    await conn.execute(text("ALTER TABLE domains ADD COLUMN list_id INTEGER"))
 
     async def close(self) -> None:
         await self._engine.dispose()
@@ -109,6 +146,7 @@ class SqlAlchemyDomainRepository(DomainRepository):
         row = DomainRow(
             name=str(domain.name),
             source=domain.source,
+            list_id=domain.list_id,
             enabled=domain.enabled,
         )
         async with self._session_factory() as session:
@@ -172,6 +210,69 @@ class SqlAlchemyDomainRepository(DomainRepository):
             return [_row_to_domain(r) for r in rows], total
 
     async def sync_auto_domains(self, names: set[str]) -> AutoSyncResult:
+        async with self._session_factory() as session:
+            result = await session.execute(select(DomainListRow.id).limit(1))
+            list_id = result.scalar_one_or_none()
+        if list_id is None:
+            return await self._sync_domains_legacy(names)
+        return await self.sync_list_domains(list_id, names)
+
+    async def sync_list_domains(self, list_id: int, names: set[str]) -> AutoSyncResult:
+        async with self._write_lock:
+            async with self._session_factory() as session:
+                manual_result = await session.execute(
+                    select(DomainRow.name).where(DomainRow.source == "manual")
+                )
+                manual_names = {row[0] for row in manual_result.fetchall()}
+
+            skipped_manual = len(names & manual_names)
+            target = names - manual_names
+
+            async with self._engine.begin() as conn:
+                if conn.dialect.name == "sqlite":
+                    await self._configure_sqlite(conn)
+
+                await conn.execute(
+                    text(
+                        "CREATE TEMP TABLE IF NOT EXISTS sync_target "
+                        "(name VARCHAR(253) PRIMARY KEY)"
+                    )
+                )
+                await conn.execute(text("DELETE FROM sync_target"))
+                target_list = sorted(target)
+                for offset in range(0, len(target_list), _BATCH_SIZE):
+                    batch = target_list[offset : offset + _BATCH_SIZE]
+                    await conn.execute(
+                        text("INSERT INTO sync_target (name) VALUES (:name)"),
+                        [{"name": name} for name in batch],
+                    )
+
+                remove_result = await conn.execute(
+                    text(
+                        "DELETE FROM domains WHERE source = 'auto' AND list_id = :list_id "
+                        "AND name NOT IN (SELECT name FROM sync_target)"
+                    ),
+                    {"list_id": list_id},
+                )
+                removed = remove_result.rowcount if remove_result.rowcount >= 0 else 0
+
+                add_result = await conn.execute(
+                    text(
+                        "INSERT INTO domains (name, source, list_id, enabled) "
+                        "SELECT t.name, 'auto', :list_id, 1 FROM sync_target t "
+                        "WHERE NOT EXISTS (SELECT 1 FROM domains d WHERE d.name = t.name)"
+                    ),
+                    {"list_id": list_id},
+                )
+                added = add_result.rowcount if add_result.rowcount >= 0 else 0
+
+            return AutoSyncResult(
+                added=added,
+                removed=removed,
+                skipped_manual=skipped_manual,
+            )
+
+    async def _sync_domains_legacy(self, names: set[str]) -> AutoSyncResult:
         async with self._write_lock:
             async with self._session_factory() as session:
                 manual_result = await session.execute(
@@ -223,6 +324,143 @@ class SqlAlchemyDomainRepository(DomainRepository):
                 removed=removed,
                 skipped_manual=skipped_manual,
             )
+
+    async def clear_list_domains(self, list_id: int) -> int:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(DomainRow).where(
+                    DomainRow.source == "auto", DomainRow.list_id == list_id
+                )
+            )
+            rows = result.scalars().all()
+            count = len(rows)
+            for row in rows:
+                await session.delete(row)
+            await session.commit()
+            return count
+
+    async def list_domain_lists(self) -> list[DomainList]:
+        async with self._session_factory() as session:
+            result = await session.execute(select(DomainListRow).order_by(DomainListRow.name))
+            return [_row_to_domain_list(r) for r in result.scalars().all()]
+
+    async def get_domain_list(self, list_id: int) -> DomainList | None:
+        async with self._session_factory() as session:
+            row = await session.get(DomainListRow, list_id)
+            return _row_to_domain_list(row) if row else None
+
+    async def add_domain_list(self, data: DomainListCreate) -> DomainList:
+        row = DomainListRow(
+            name=data.name,
+            type=data.type,
+            url=data.url,
+            file_content=data.file_content,
+            enabled=data.enabled,
+            sync_interval=data.sync_interval,
+        )
+        async with self._session_factory() as session:
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return _row_to_domain_list(row)
+
+    async def update_domain_list(self, list_id: int, data: DomainListUpdate) -> DomainList | None:
+        async with self._session_factory() as session:
+            row = await session.get(DomainListRow, list_id)
+            if row is None:
+                return None
+            if data.name is not None:
+                row.name = data.name
+            if data.enabled is not None:
+                row.enabled = data.enabled
+            if data.unset_sync_interval:
+                row.sync_interval = None
+            elif data.sync_interval is not None:
+                row.sync_interval = data.sync_interval
+            if data.url is not None:
+                row.url = data.url
+            if data.file_content is not None:
+                row.file_content = data.file_content
+            await session.commit()
+            await session.refresh(row)
+            return _row_to_domain_list(row)
+
+    async def remove_domain_list(self, list_id: int) -> bool:
+        async with self._session_factory() as session:
+            row = await session.get(DomainListRow, list_id)
+            if row is None:
+                return False
+            await session.delete(row)
+            await session.commit()
+            return True
+
+    async def mark_list_synced(self, list_id: int, synced_at: datetime) -> None:
+        async with self._session_factory() as session:
+            row = await session.get(DomainListRow, list_id)
+            if row is None:
+                return
+            row.last_sync_at = synced_at
+            await session.commit()
+
+    async def get_default_sync_interval(self) -> int:
+        async with self._session_factory() as session:
+            row = await session.get(AppSettingRow, DEFAULT_SYNC_INTERVAL_KEY)
+            if row is None:
+                return DEFAULT_SYNC_INTERVAL_SECONDS
+            try:
+                return int(row.value)
+            except ValueError:
+                return DEFAULT_SYNC_INTERVAL_SECONDS
+
+    async def set_default_sync_interval(self, seconds: int) -> None:
+        async with self._session_factory() as session:
+            row = await session.get(AppSettingRow, DEFAULT_SYNC_INTERVAL_KEY)
+            if row is None:
+                session.add(AppSettingRow(key=DEFAULT_SYNC_INTERVAL_KEY, value=str(seconds)))
+            else:
+                row.value = str(seconds)
+            await session.commit()
+
+    async def seed_domain_list(
+        self,
+        *,
+        name: str,
+        list_type: str,
+        url: str | None,
+        sync_interval: int,
+    ) -> DomainList:
+        async with self._session_factory() as session:
+            existing = await session.execute(select(DomainListRow.id).limit(1))
+            if existing.scalar_one_or_none() is not None:
+                result = await session.execute(select(DomainListRow).limit(1))
+                row = result.scalar_one()
+                return _row_to_domain_list(row)
+
+            session.add(
+                AppSettingRow(
+                    key=DEFAULT_SYNC_INTERVAL_KEY,
+                    value=str(sync_interval),
+                )
+            )
+            list_row = DomainListRow(
+                name=name,
+                type=list_type,
+                url=url,
+                enabled=True,
+            )
+            session.add(list_row)
+            await session.flush()
+
+            await session.execute(
+                text(
+                    "UPDATE domains SET list_id = :list_id "
+                    "WHERE source = 'auto' AND list_id IS NULL"
+                ),
+                {"list_id": list_row.id},
+            )
+            await session.commit()
+            await session.refresh(list_row)
+            return _row_to_domain_list(list_row)
 
     async def list_exclude_keywords(self) -> list[str]:
         async with self._session_factory() as session:

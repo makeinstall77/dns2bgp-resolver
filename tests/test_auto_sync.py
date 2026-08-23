@@ -30,6 +30,7 @@ from dns2bgp_resolver.application.services.auto_list_sync import (
     parse_domain_lines,
 )
 from dns2bgp_resolver.application.services.resolve_pipeline import ResolvePipeline
+from dns2bgp_resolver.application.ports.repository import DomainListCreate
 from dns2bgp_resolver.config import AutoListSettings, BirdSettings, RefreshSettings
 from dns2bgp_resolver.domain import Domain
 from dns2bgp_resolver.infrastructure.bird.static_file_exporter import StaticFileBirdExporter
@@ -69,6 +70,18 @@ def bird_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def clock():
+    return FixedClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+
+async def _add_url_list(repo, url: str = "http://test/list") -> int:
+    created = await repo.add_domain_list(
+        DomainListCreate(name="test", type="url", url=url, enabled=True)
+    )
+    return created.id
+
+
+@pytest.fixture
 async def pipeline(repo, bird_path: Path):
     from dns2bgp_resolver.application.ports.dns_resolver import DnsResolver
     from dns2bgp_resolver.domain import DomainName, IpAddress, ResolvedAddress
@@ -80,12 +93,12 @@ async def pipeline(repo, bird_path: Path):
     exporter = StaticFileBirdExporter(
         BirdSettings(include_path=str(bird_path), nexthop="wg0", birdc_enable=False)
     )
-    clock = FixedClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    fixed_clock = FixedClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
     pipe = ResolvePipeline(
         repository=repo,
         resolver=FakeDns(),
         exporter=exporter,
-        clock=clock,
+        clock=fixed_clock,
         refresh=RefreshSettings(max_interval=86400, min_interval=60),
         export_path=str(bird_path),
     )
@@ -120,14 +133,15 @@ async def test_list_due_skipped_during_sync(repo):
 
 @pytest.mark.asyncio
 async def test_sync_auto_domains_add_and_remove(repo):
-    result = await repo.sync_auto_domains({"a.com", "b.com"})
+    list_id = await _add_url_list(repo)
+    result = await repo.sync_list_domains(list_id, {"a.com", "b.com"})
     assert result.added == 2
     assert result.removed == 0
 
     auto = await repo.search_auto("")
     assert auto[1] == 2
 
-    result2 = await repo.sync_auto_domains({"b.com", "c.com"})
+    result2 = await repo.sync_list_domains(list_id, {"b.com", "c.com"})
     assert result2.added == 1
     assert result2.removed == 1
 
@@ -138,7 +152,8 @@ async def test_sync_auto_domains_add_and_remove(repo):
 @pytest.mark.asyncio
 async def test_sync_skips_manual_conflict(repo):
     await repo.add(Domain.create("shared.com", source="manual"))
-    result = await repo.sync_auto_domains({"shared.com", "auto.com"})
+    list_id = await _add_url_list(repo)
+    result = await repo.sync_list_domains(list_id, {"shared.com", "auto.com"})
     assert result.added == 1
     assert result.skipped_manual == 1
 
@@ -150,7 +165,8 @@ async def test_sync_skips_manual_conflict(repo):
 @pytest.mark.asyncio
 async def test_sync_does_not_remove_manual(repo):
     await repo.add(Domain.create("manual.com", source="manual"))
-    await repo.sync_auto_domains({"auto.com"})
+    list_id = await _add_url_list(repo)
+    await repo.sync_list_domains(list_id, {"auto.com"})
     manual = await repo.list_manual()
     assert len(manual) == 1
     assert str(manual[0].name) == "manual.com"
@@ -159,14 +175,16 @@ async def test_sync_does_not_remove_manual(repo):
 @pytest.mark.asyncio
 async def test_list_manual_excludes_auto(repo):
     await repo.add(Domain.create("manual.com", source="manual"))
-    await repo.sync_auto_domains({"auto.com"})
+    list_id = await _add_url_list(repo)
+    await repo.sync_list_domains(list_id, {"auto.com"})
     manual = await repo.list_manual()
     assert [str(d.name) for d in manual] == ["manual.com"]
 
 
 @pytest.mark.asyncio
 async def test_search_auto_pagination(repo):
-    await repo.sync_auto_domains({f"domain{i}.com" for i in range(5)})
+    list_id = await _add_url_list(repo)
+    await repo.sync_list_domains(list_id, {f"domain{i}.com" for i in range(5)})
     items, total = await repo.search_auto("", offset=0, limit=2)
     assert total == 5
     assert len(items) == 2
@@ -176,7 +194,8 @@ async def test_search_auto_pagination(repo):
 
 @pytest.mark.asyncio
 async def test_search_auto_query_filter(repo):
-    await repo.sync_auto_domains({"casino.com", "example.com", "my-casino.org"})
+    list_id = await _add_url_list(repo)
+    await repo.sync_list_domains(list_id, {"casino.com", "example.com", "my-casino.org"})
     items, total = await repo.search_auto("casino", offset=0, limit=10)
     assert total == 2
     assert {str(d.name) for d in items} == {"casino.com", "my-casino.org"}
@@ -193,13 +212,15 @@ async def test_exclude_keyword_crud(repo):
 
 
 @pytest.mark.asyncio
-async def test_auto_list_sync_service(repo, pipeline, bird_path: Path):
+async def test_auto_list_sync_service(repo, pipeline, bird_path: Path, clock):
+    await _add_url_list(repo)
     downloader = FakeDownloader("good.com\ncasino-bad.com\n")
     await repo.add_exclude_keyword("casino")
     service = AutoListSyncService(
         repository=repo,
         pipeline=pipeline,
         settings=AutoListSettings(enabled=True, url="http://test/list"),
+        clock=clock,
         downloader=downloader,
     )
     result = await service.sync()
@@ -212,12 +233,14 @@ async def test_auto_list_sync_service(repo, pipeline, bird_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_auto_list_sync_replace(repo, pipeline):
+async def test_auto_list_sync_replace(repo, pipeline, clock):
+    await _add_url_list(repo)
     downloader = FakeDownloader("first.com\n")
     service = AutoListSyncService(
         repository=repo,
         pipeline=pipeline,
         settings=AutoListSettings(enabled=True),
+        clock=clock,
         downloader=downloader,
     )
     await service.sync()
@@ -232,17 +255,19 @@ async def test_auto_list_sync_replace(repo, pipeline):
 
 @pytest.mark.asyncio
 async def test_remove_auto_domain_fails(repo):
-    await repo.sync_auto_domains({"auto.com"})
+    list_id = await _add_url_list(repo)
+    await repo.sync_list_domains(list_id, {"auto.com"})
     handler = RemoveDomainHandler(repo)
     result = await handler.handle(RemoveDomainCommand(name="auto.com"))
     assert not result.ok
-    assert "auto sync" in (result.error or "")
+    assert "domain list" in (result.error or "")
 
 
 @pytest.mark.asyncio
 async def test_list_domains_handler_manual_only(repo):
     await repo.add(Domain.create("manual.com", source="manual"))
-    await repo.sync_auto_domains({"auto.com"})
+    list_id = await _add_url_list(repo)
+    await repo.sync_list_domains(list_id, {"auto.com"})
     handler = ListDomainsHandler(repo)
     result = await handler.handle(ListDomainsCommand())
     assert result.ok
@@ -252,7 +277,8 @@ async def test_list_domains_handler_manual_only(repo):
 
 @pytest.mark.asyncio
 async def test_search_auto_domains_command(repo):
-    await repo.sync_auto_domains({"alpha.com", "beta.com", "alphabet.com"})
+    list_id = await _add_url_list(repo)
+    await repo.sync_list_domains(list_id, {"alpha.com", "beta.com", "alphabet.com"})
     handler = SearchAutoDomainsHandler(repo)
     result = await handler.handle(SearchAutoDomainsCommand(query="alpha", page=1, page_size=2))
     assert result.ok
@@ -262,12 +288,14 @@ async def test_search_auto_domains_command(repo):
 
 
 @pytest.mark.asyncio
-async def test_sync_auto_list_command(repo, pipeline):
+async def test_sync_auto_list_command(repo, pipeline, clock):
+    await _add_url_list(repo)
     downloader = FakeDownloader("cmd.com\n")
     service = AutoListSyncService(
         repository=repo,
         pipeline=pipeline,
         settings=AutoListSettings(enabled=True),
+        clock=clock,
         downloader=downloader,
     )
     handler = SyncAutoListHandler(service)
