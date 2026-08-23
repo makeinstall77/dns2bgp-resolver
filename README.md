@@ -6,6 +6,57 @@ CLI, Telegram bot, and web UI all talk to the same command bus. Persistence goes
 
 ## Install
 
+### Debian package
+
+Build dependencies:
+
+```bash
+sudo apt install python3 python3-venv python3-pip dpkg-dev
+```
+
+Build and install:
+
+```bash
+git clone <repo-url> && cd dns2bgp-resolver
+./scripts/build-deb.sh
+sudo dpkg -i dist/dns2bgp-resolver_*.deb
+```
+
+Reinstall after changes:
+
+```bash
+./scripts/build-deb.sh && sudo dpkg -i dist/dns2bgp-resolver_*.deb
+```
+
+Remove:
+
+```bash
+sudo apt remove dns2bgp-resolver      # stops service, keeps /etc and /var/lib
+sudo apt purge dns2bgp-resolver       # also removes /etc/dns2bgp; data in /var/lib/dns2bgp stays
+```
+
+One-liner build + install:
+
+```bash
+./scripts/build-deb.sh --install
+```
+
+After install, edit `/etc/dns2bgp/config.yaml` (`web.api_key`, `bird.nexthop`, `telegram.token`), then:
+
+```bash
+sudo systemctl restart dns2bgp
+```
+
+Add to `bird.conf`:
+
+```bird
+include "/var/lib/dns2bgp/dns2bgp.routes";
+```
+
+See [deploy/bird.include.example.conf](deploy/bird.include.example.conf).
+
+### Development (from source)
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate

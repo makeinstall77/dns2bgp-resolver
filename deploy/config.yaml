@@ -1,0 +1,34 @@
+database:
+  url: "sqlite+aiosqlite:////var/lib/dns2bgp/dns2bgp.db"
+
+dns:
+  nameservers: []
+  timeout: 3.0
+
+refresh:
+  max_interval: 86400
+  min_interval: 60
+
+bird:
+  include_path: "/var/lib/dns2bgp/dns2bgp.routes"
+  protocol_name: dns2bgp
+  table: master4
+  nexthop: "wg0"
+  birdc_enable: false
+  birdc_bin: birdc
+
+web:
+  host: "127.0.0.1"
+  port: 8080
+  api_key: "change-me"
+
+telegram:
+  token: ""
+  allowed_user_ids: []
+
+auto_list:
+  enabled: true
+  url: "https://antifilter.download/list/domains.lst"
+  sync_interval: 86400
+  sync_on_startup: true
+  exclude_keywords: []

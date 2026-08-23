@@ -4,6 +4,8 @@ __pycache__/
 .eggs/
 dist/
 build/
+build/deb-staging/
+build/wheel-venv/
 .venv/
 venv/
 .env
