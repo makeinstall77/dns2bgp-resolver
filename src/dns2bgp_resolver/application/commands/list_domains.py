@@ -17,6 +17,6 @@ class ListDomainsHandler:
 
     async def handle(self, command: ListDomainsCommand) -> CommandResult[list[DomainView]]:
         del command
-        domains = await self._repository.list_all()
+        domains = await self._repository.list_manual()
         views = [domain_to_view(d) for d in domains]
         return CommandResult.success(views, message=f"{len(views)} domain(s)")

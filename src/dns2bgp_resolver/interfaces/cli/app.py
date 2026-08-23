@@ -13,6 +13,7 @@ from dns2bgp_resolver.application.commands import (
     ListDomainsCommand,
     RemoveDomainCommand,
     ResolveNowCommand,
+    SyncAutoListCommand,
 )
 from dns2bgp_resolver.config import Settings
 from dns2bgp_resolver.container import AppContainer, build_container
@@ -148,6 +149,27 @@ def export_routes(ctx: typer.Context) -> None:
             raise typer.Exit(1)
         summary = result.data
         typer.echo(f"exported {summary.prefix_count} prefix(es) → {summary.path}")
+
+    _run(_with_container(ctx.obj["config"], _action))
+
+
+@app.command("sync-auto")
+def sync_auto(ctx: typer.Context) -> None:
+    """Download and sync auto domain list from antifilter."""
+
+    async def _action(container: AppContainer):
+        result = await container.bus.execute(SyncAutoListCommand())
+        if not result.ok:
+            typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        data = result.data
+        if data:
+            typer.echo(
+                f"sync: added={data.added} removed={data.removed} "
+                f"skipped_manual={data.skipped_manual}"
+            )
+        else:
+            typer.echo(result.message)
 
     _run(_with_container(ctx.obj["config"], _action))
 

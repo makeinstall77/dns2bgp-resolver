@@ -20,6 +20,8 @@ async def run_services(
     enable_telegram: bool = True,
 ) -> None:
     await container.scheduler.start()
+    if container.settings.auto_list.enabled:
+        await container.auto_sync_scheduler.start()
     # Ensure bird file exists even on empty DB
     await container.pipeline.export_routes()
 
@@ -64,3 +66,4 @@ async def run_services(
         if web_server is not None:
             web_server.should_exit = True
         await container.scheduler.stop()
+        await container.auto_sync_scheduler.stop()
