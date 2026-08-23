@@ -40,9 +40,29 @@ Set `bird.include_path` and optionally `bird.birdc_enable: true` in `config.yaml
 
 ## Web & Telegram
 
-- Web UI: `http://127.0.0.1:8080/` (API key from config; send `X-API-Key` for REST)
+- Web UI: `http://127.0.0.1:8080/` — manual domains; `/auto` — auto list with search and keyword filter
 - REST: `GET/POST /api/domains`, `DELETE /api/domains/{name}`, `POST /api/resolve`
-- Telegram: set `telegram.token` and `telegram.allowed_user_ids`; commands `/add`, `/remove`, `/list`, `/resolve`
+- Auto REST: `GET /api/auto/domains?q=&page=`, `GET/POST/DELETE /api/auto/filters`, `POST /api/auto/sync`
+- Telegram: set `telegram.token` and `telegram.allowed_user_ids`; commands `/add`, `/remove`, `/list`, `/resolve`, `/search`, `/filter`
+
+## Auto domain list
+
+Daily sync from antifilter.download (configurable in `auto_list` section):
+
+```yaml
+auto_list:
+  enabled: true
+  url: "https://antifilter.download/list/domains.lst"
+  sync_interval: 86400
+  sync_on_startup: true
+  exclude_keywords: []
+```
+
+Manual and auto domains are stored separately. `list` shows manual only. Auto domains are replaced on each sync (manual domains are never touched). Keyword filter excludes domains containing configured substrings.
+
+```bash
+dns2bgp sync-auto    # manual sync trigger
+```
 
 ## PostgreSQL later
 

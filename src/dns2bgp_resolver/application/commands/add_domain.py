@@ -19,7 +19,7 @@ class AddDomainHandler:
 
     async def handle(self, command: AddDomainCommand) -> CommandResult[DomainView]:
         try:
-            domain = Domain.create(command.name)
+            domain = Domain.create(command.name, source="manual")
         except ValueError as exc:
             return CommandResult.failure(str(exc))
 

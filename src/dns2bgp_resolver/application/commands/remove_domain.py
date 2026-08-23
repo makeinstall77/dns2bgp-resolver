@@ -22,6 +22,12 @@ class RemoveDomainHandler:
         except ValueError as exc:
             return CommandResult.failure(str(exc))
 
+        existing = await self._repository.get(name)
+        if existing is None:
+            return CommandResult.failure(f"domain not found: {name}")
+        if existing.source == "auto":
+            return CommandResult.failure(f"domain is managed by auto sync: {name}")
+
         removed = await self._repository.remove(name)
         if not removed:
             return CommandResult.failure(f"domain not found: {name}")
