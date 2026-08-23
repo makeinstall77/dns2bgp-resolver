@@ -6,6 +6,9 @@ case "$1" in
         if ! getent passwd dns2bgp >/dev/null; then
             adduser --system --group --home /var/lib/dns2bgp --no-create-home dns2bgp
         fi
+        if getent group bird >/dev/null; then
+            adduser dns2bgp bird 2>/dev/null || true
+        fi
         install -d -o dns2bgp -g dns2bgp -m 0750 /var/lib/dns2bgp
         chown -R dns2bgp:dns2bgp /var/lib/dns2bgp
         chown -R root:root /opt/dns2bgp
