@@ -108,6 +108,17 @@ async def test_apply_keyword_filter():
 
 
 @pytest.mark.asyncio
+async def test_list_due_skipped_during_sync(repo):
+    await repo._write_lock.acquire()
+    try:
+        assert repo.sync_in_progress
+        due = await repo.list_due(datetime(2026, 1, 1, tzinfo=timezone.utc))
+        assert due == []
+    finally:
+        repo._write_lock.release()
+
+
+@pytest.mark.asyncio
 async def test_sync_auto_domains_add_and_remove(repo):
     result = await repo.sync_auto_domains({"a.com", "b.com"})
     assert result.added == 2
