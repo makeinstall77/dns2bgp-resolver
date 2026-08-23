@@ -42,6 +42,14 @@ class TelegramSettings(BaseModel):
     allowed_user_ids: list[int] = Field(default_factory=list)
 
 
+class AutoListSettings(BaseModel):
+    enabled: bool = True
+    url: str = "https://antifilter.download/list/domains.lst"
+    sync_interval: int = 86400
+    sync_on_startup: bool = True
+    exclude_keywords: list[str] = Field(default_factory=list)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="DNS2BGP_",
@@ -55,6 +63,7 @@ class Settings(BaseSettings):
     bird: BirdSettings = Field(default_factory=BirdSettings)
     web: WebSettings = Field(default_factory=WebSettings)
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)
+    auto_list: AutoListSettings = Field(default_factory=AutoListSettings)
 
     @classmethod
     def load(cls, config_path: str | Path | None = None) -> Settings:

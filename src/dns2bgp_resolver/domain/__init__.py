@@ -4,7 +4,9 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from ipaddress import IPv4Address, ip_address
-from typing import Self
+from typing import Literal, Self
+
+DomainSource = Literal["manual", "auto"]
 
 
 _DOMAIN_RE = re.compile(
@@ -58,6 +60,7 @@ class ResolvedAddress:
 class Domain:
     name: DomainName
     id: int | None = None
+    source: DomainSource = "manual"
     enabled: bool = True
     created_at: datetime | None = None
     next_resolve_at: datetime | None = None
@@ -66,5 +69,5 @@ class Domain:
     addresses: list[ResolvedAddress] = field(default_factory=list)
 
     @classmethod
-    def create(cls, name: str) -> Self:
-        return cls(name=DomainName(name))
+    def create(cls, name: str, *, source: DomainSource = "manual") -> Self:
+        return cls(name=DomainName(name), source=source)

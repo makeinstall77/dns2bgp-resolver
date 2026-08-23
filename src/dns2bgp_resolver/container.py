@@ -6,25 +6,39 @@ from pathlib import Path
 from dns2bgp_resolver.application.commands import (
     AddDomainCommand,
     AddDomainHandler,
+    AddExcludeKeywordCommand,
+    AddExcludeKeywordHandler,
     CommandBus,
+    CommandResult,
+    DomainView,
     ExportRoutesCommand,
     ExportRoutesHandler,
     ListDomainsCommand,
     ListDomainsHandler,
+    ListExcludeKeywordsCommand,
+    ListExcludeKeywordsHandler,
     RemoveDomainCommand,
     RemoveDomainHandler,
+    RemoveExcludeKeywordCommand,
+    RemoveExcludeKeywordHandler,
     ResolveNowCommand,
     ResolveNowHandler,
+    SearchAutoDomainsCommand,
+    SearchAutoDomainsHandler,
+    SyncAutoListCommand,
+    SyncAutoListHandler,
 )
-from dns2bgp_resolver.application.commands.dto import CommandResult, DomainView
+from dns2bgp_resolver.application.commands.dto import domain_to_view
 from dns2bgp_resolver.application.ports.clock import SystemClock
 from dns2bgp_resolver.application.ports.repository import DomainRepository
+from dns2bgp_resolver.application.services.auto_list_sync import AutoListSyncService
 from dns2bgp_resolver.application.services.resolve_pipeline import ResolvePipeline
 from dns2bgp_resolver.config import Settings
 from dns2bgp_resolver.domain import DomainName
 from dns2bgp_resolver.infrastructure.bird.static_file_exporter import StaticFileBirdExporter
 from dns2bgp_resolver.infrastructure.db.sqlite_repository import SqlAlchemyDomainRepository
 from dns2bgp_resolver.infrastructure.dns.dnspython_resolver import DnspythonResolver
+from dns2bgp_resolver.infrastructure.scheduling.auto_list_scheduler import AutoListSyncScheduler
 from dns2bgp_resolver.infrastructure.scheduling.refresh_scheduler import RefreshScheduler
 
 
@@ -35,6 +49,8 @@ class AppContainer:
     bus: CommandBus
     pipeline: ResolvePipeline
     scheduler: RefreshScheduler
+    auto_sync_service: AutoListSyncService
+    auto_sync_scheduler: AutoListSyncScheduler
 
     async def startup(self) -> None:
         url = self.settings.database.url
@@ -48,8 +64,17 @@ class AppContainer:
         bird_dir.mkdir(parents=True, exist_ok=True)
         bird_dir.chmod(0o755)
         await self.repository.initialize()
+        await self._seed_exclude_keywords()
+
+    async def _seed_exclude_keywords(self) -> None:
+        existing = await self.repository.list_exclude_keywords()
+        if existing:
+            return
+        for keyword in self.settings.auto_list.exclude_keywords:
+            await self.repository.add_exclude_keyword(keyword)
 
     async def shutdown(self) -> None:
+        await self.auto_sync_scheduler.stop()
         await self.scheduler.stop()
         await self.repository.close()
 
@@ -68,8 +93,6 @@ class AddDomainAndResolveHandler:
             await self._pipeline.resolve_one(DomainName(command.name))
             updated = await self._repository.get(DomainName(command.name))
             if updated is not None:
-                from dns2bgp_resolver.application.commands.dto import domain_to_view
-
                 return CommandResult.success(
                     domain_to_view(updated),
                     message=f"added and resolved {command.name}",
@@ -103,18 +126,35 @@ def build_container(settings: Settings | None = None) -> AppContainer:
         refresh=settings.refresh,
         export_path=settings.bird.include_path,
     )
+    auto_sync_service = AutoListSyncService(
+        repository=repository,
+        pipeline=pipeline,
+        settings=settings.auto_list,
+    )
     bus = CommandBus()
     bus.register(AddDomainCommand, AddDomainAndResolveHandler(repository, pipeline))
     bus.register(RemoveDomainCommand, RemoveDomainAndExportHandler(repository, pipeline))
     bus.register(ListDomainsCommand, ListDomainsHandler(repository))
     bus.register(ResolveNowCommand, ResolveNowHandler(pipeline))
     bus.register(ExportRoutesCommand, ExportRoutesHandler(pipeline))
+    bus.register(SearchAutoDomainsCommand, SearchAutoDomainsHandler(repository))
+    bus.register(SyncAutoListCommand, SyncAutoListHandler(auto_sync_service))
+    bus.register(ListExcludeKeywordsCommand, ListExcludeKeywordsHandler(repository))
+    bus.register(AddExcludeKeywordCommand, AddExcludeKeywordHandler(repository))
+    bus.register(RemoveExcludeKeywordCommand, RemoveExcludeKeywordHandler(repository))
 
     scheduler = RefreshScheduler(pipeline)
+    auto_sync_scheduler = AutoListSyncScheduler(
+        auto_sync_service,
+        sync_interval=settings.auto_list.sync_interval,
+        sync_on_startup=settings.auto_list.sync_on_startup,
+    )
     return AppContainer(
         settings=settings,
         repository=repository,
         bus=bus,
         pipeline=pipeline,
         scheduler=scheduler,
+        auto_sync_service=auto_sync_service,
+        auto_sync_scheduler=auto_sync_scheduler,
     )
