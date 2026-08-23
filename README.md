@@ -91,14 +91,16 @@ Set `bird.include_path` and optionally `bird.birdc_enable: true` in `config.yaml
 
 ## Web & Telegram
 
-- Web UI: `http://127.0.0.1:8080/` — manual domains; `/auto` — auto list with search and keyword filter
+- Web UI: `http://127.0.0.1:8080/` — manual domains; `/auto` — auto domains; `/settings` — domain lists and sync
 - REST: `GET/POST /api/domains`, `DELETE /api/domains/{name}`, `POST /api/resolve`
 - Auto REST: `GET /api/auto/domains?q=&page=`, `GET/POST/DELETE /api/auto/filters`, `POST /api/auto/sync`
-- Telegram: set `telegram.token` and `telegram.allowed_user_ids`; commands `/add`, `/remove`, `/list`, `/resolve`, `/search`, `/filter`
+- Lists REST: `GET/POST /api/lists`, `PATCH/DELETE /api/lists/{id}`, `POST /api/lists/{id}/sync|clear`
+- Settings REST: `GET/PATCH /api/settings`
+- Telegram: button UI (Reply + Inline keyboards); `/start` opens main menu
 
-## Auto domain list
+## Domain lists
 
-Daily sync from antifilter.download (configurable in `auto_list` section):
+Multiple URL/file lists with per-list sync interval. Bootstrap from config on first run:
 
 ```yaml
 auto_list:
@@ -109,11 +111,20 @@ auto_list:
   exclude_keywords: []
 ```
 
-Manual and auto domains are stored separately. `list` shows manual only. Auto domains are replaced on each sync (manual domains are never touched). Keyword filter excludes domains containing configured substrings.
+Runtime management via web `/settings`, CLI, or Telegram. Disable sync keeps domains; clear removes domains only; delete removes list and domains.
+
+Routes export as `/24` prefixes (deduplicated).
 
 ```bash
-dns2bgp sync-auto    # manual sync trigger
+dns2bgp lists show
+dns2bgp lists add-url https://example.com/domains.lst --name mylist
+dns2bgp lists add-file ./domains.txt
+dns2bgp lists enable|disable|clear|remove|sync [id]
+dns2bgp settings sync-interval 86400
+dns2bgp sync-auto
 ```
+
+Manual and auto domains are stored separately. `list` shows manual only. Keyword filter excludes domains containing configured substrings.
 
 ## PostgreSQL later
 

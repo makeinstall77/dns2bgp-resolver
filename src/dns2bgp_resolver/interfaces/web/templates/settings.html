@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dns2bgp-resolver — settings</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --accent: #3d9cf0;
+      --danger: #e85d5d;
+      --border: #2a3548;
+      --mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+      --sans: "IBM Plex Sans", "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #1c3a5a 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #1a2e28 0%, transparent 50%),
+        var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    main { max-width: 960px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+    h1 { font-size: 1.75rem; margin: 0 0 0.35rem; }
+    h2 { font-size: 1.1rem; margin: 2rem 0 0.75rem; }
+    .sub { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.95rem; }
+    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .tabs a {
+      color: var(--muted);
+      text-decoration: none;
+      padding: 0.5rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+    .tabs a.active { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+    input, select {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.6rem 0.75rem;
+      border-radius: 6px;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+    }
+    button {
+      background: var(--accent);
+      color: #041018;
+      border: none;
+      border-radius: 6px;
+      padding: 0.55rem 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+    .grid3 { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.65rem; align-items: end; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { text-align: left; padding: 0.55rem 0.4rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { color: var(--muted); font-weight: 500; }
+    .mono { font-family: var(--mono); font-size: 0.8rem; }
+    .muted { color: var(--muted); }
+    .ok { color: #6bcf8a; }
+    .err { color: var(--danger); margin-bottom: 1rem; }
+    .msg { color: #6bcf8a; margin-bottom: 1rem; }
+    .actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+    .key-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; }
+    .key-row label { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+    .badge { display: inline-block; padding: 0.15rem 0.45rem; border-radius: 4px; font-size: 0.75rem; border: 1px solid var(--border); }
+    .badge.on { border-color: #6bcf8a; color: #6bcf8a; }
+    .badge.off { border-color: var(--muted); color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>dns2bgp-resolver</h1>
+    <p class="sub">Domain lists, sync intervals, and filters</p>
+
+    <nav class="tabs">
+      <a href="/">Manual</a>
+      <a href="/auto">Auto</a>
+      <a href="/settings" class="active">Settings</a>
+    </nav>
+
+    <div class="key-row">
+      <label for="api_key_store">API key</label>
+      <input type="password" id="api_key_store" placeholder="from config" style="flex:1" />
+    </div>
+
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+    {% if message %}<div class="msg">{{ message }}</div>{% endif %}
+
+    <h2>Default sync interval</h2>
+    <form class="panel grid3" method="post" action="/ui/settings/interval">
+      <input type="hidden" name="api_key" class="api_key_field" value="" />
+      <div>
+        <div class="muted" style="margin-bottom:0.35rem">Seconds (min 60)</div>
+        <input type="number" name="seconds" min="60" value="{{ default_interval }}" required />
+      </div>
+      <div class="muted" style="padding-bottom:0.6rem">Used when list has no override</div>
+      <button type="submit">Save</button>
+    </form>
+
+    <h2>Add URL list</h2>
+    <form class="panel grid3" method="post" action="/ui/lists/add-url">
+      <input type="hidden" name="api_key" class="api_key_field" value="" />
+      <input type="text" name="name" placeholder="name" required />
+      <input type="url" name="url" placeholder="https://example.com/domains.lst" required style="grid-column: span 1" />
+      <button type="submit">Add</button>
+    </form>
+
+    <h2>Upload file list</h2>
+    <form class="panel grid3" method="post" action="/ui/lists/add-file" enctype="multipart/form-data">
+      <input type="hidden" name="api_key" class="api_key_field" value="" />
+      <input type="text" name="name" placeholder="name (optional)" />
+      <input type="file" name="file" accept=".txt,.lst,text/plain" required />
+      <button type="submit">Upload</button>
+    </form>
+
+    <h2>Domain lists</h2>
+    {% if lists %}
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Source</th>
+          <th>Sync</th>
+          <th>Interval</th>
+          <th>Last sync</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in lists %}
+        <tr>
+          <td>{{ item.name }}</td>
+          <td><span class="badge">{{ item.type }}</span></td>
+          <td class="mono muted">
+            {% if item.type == 'url' %}{{ item.url or '-' }}
+            {% else %}file{% if item.has_file %} (stored){% endif %}{% endif %}
+          </td>
+          <td>
+            {% if item.enabled %}<span class="badge on">on</span>{% else %}<span class="badge off">off</span>{% endif %}
+          </td>
+          <td>{{ item.sync_interval or default_interval }}s</td>
+          <td class="muted">{{ item.last_sync_at or 'never' }}</td>
+          <td>
+            <div class="actions">
+              <form method="post" action="/ui/lists/toggle">
+                <input type="hidden" name="api_key" class="api_key_field" value="" />
+                <input type="hidden" name="id" value="{{ item.id }}" />
+                <input type="hidden" name="enabled" value="{{ '0' if item.enabled else '1' }}" />
+                <button type="submit" class="secondary">{{ 'Disable' if item.enabled else 'Enable' }}</button>
+              </form>
+              <form method="post" action="/ui/lists/sync">
+                <input type="hidden" name="api_key" class="api_key_field" value="" />
+                <input type="hidden" name="id" value="{{ item.id }}" />
+                <button type="submit" class="secondary">Sync</button>
+              </form>
+              <form method="post" action="/ui/lists/clear">
+                <input type="hidden" name="api_key" class="api_key_field" value="" />
+                <input type="hidden" name="id" value="{{ item.id }}" />
+                <button type="submit" class="secondary">Clear</button>
+              </form>
+              <form method="post" action="/ui/lists/remove">
+                <input type="hidden" name="api_key" class="api_key_field" value="" />
+                <input type="hidden" name="id" value="{{ item.id }}" />
+                <button type="submit" class="danger">Delete</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No domain lists configured.</p>
+    {% endif %}
+
+    <form method="post" action="/ui/lists/sync-all" style="margin-top:1rem">
+      <input type="hidden" name="api_key" class="api_key_field" value="" />
+      <button type="submit">Sync all enabled</button>
+    </form>
+  </main>
+  <script>
+    const keyInput = document.getElementById('api_key_store');
+    const stored = localStorage.getItem('dns2bgp_api_key');
+    if (stored) keyInput.value = stored;
+    keyInput.addEventListener('change', () => localStorage.setItem('dns2bgp_api_key', keyInput.value));
+    document.querySelectorAll('.api_key_field').forEach(el => {
+      el.value = keyInput.value;
+      keyInput.addEventListener('input', () => { el.value = keyInput.value; });
+    });
+  </script>
+</body>
+</html>

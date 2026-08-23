@@ -3,10 +3,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from ipaddress import IPv4Address, ip_address
+from ipaddress import IPv4Address, IPv4Network, ip_address
 from typing import Literal, Self
 
 DomainSource = Literal["manual", "auto"]
+DomainListType = Literal["url", "file"]
 
 
 _DOMAIN_RE = re.compile(
@@ -44,10 +45,16 @@ class IpAddress:
 
     def as_prefix(self, prefix_len: int | None = None) -> str:
         length = prefix_len if prefix_len is not None else 32
+        if length == 24:
+            return str(IPv4Network(f"{self.value}/24", strict=False))
         return f"{self.value}/{length}"
 
     def __str__(self) -> str:
         return self.value
+
+
+def ip_to_prefix24(ip: str) -> str:
+    return str(IPv4Network(f"{ip}/24", strict=False))
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,11 +63,25 @@ class ResolvedAddress:
     ttl_seconds: int
 
 
+@dataclass(frozen=True, slots=True)
+class DomainList:
+    id: int
+    name: str
+    type: DomainListType
+    url: str | None = None
+    file_content: str | None = None
+    enabled: bool = True
+    sync_interval: int | None = None
+    last_sync_at: datetime | None = None
+    created_at: datetime | None = None
+
+
 @dataclass(slots=True)
 class Domain:
     name: DomainName
     id: int | None = None
     source: DomainSource = "manual"
+    list_id: int | None = None
     enabled: bool = True
     created_at: datetime | None = None
     next_resolve_at: datetime | None = None
