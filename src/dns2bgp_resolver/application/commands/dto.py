@@ -48,6 +48,27 @@ class AutoSyncView:
     added: int
     removed: int
     skipped_manual: int
+    list_id: int | None = None
+    list_name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DomainListView:
+    id: int
+    name: str
+    type: str
+    url: str | None
+    enabled: bool
+    sync_interval: int | None
+    last_sync_at: str | None
+    created_at: str | None
+    domain_count: int = 0
+    has_file: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SettingsView:
+    default_sync_interval: int
 
 
 @dataclass(frozen=True, slots=True)

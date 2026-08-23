@@ -4,7 +4,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 
-from dns2bgp_resolver.domain import Domain, DomainName, ResolvedAddress
+from dns2bgp_resolver.domain import Domain, DomainList, DomainName, ResolvedAddress
+
+
+DEFAULT_SYNC_INTERVAL_KEY = "default_sync_interval"
+DEFAULT_SYNC_INTERVAL_SECONDS = 86400
 
 
 @dataclass(frozen=True, slots=True)
@@ -12,6 +16,26 @@ class AutoSyncResult:
     added: int
     removed: int
     skipped_manual: int
+
+
+@dataclass(frozen=True, slots=True)
+class DomainListCreate:
+    name: str
+    type: str
+    url: str | None = None
+    file_content: str | None = None
+    enabled: bool = True
+    sync_interval: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DomainListUpdate:
+    name: str | None = None
+    enabled: bool | None = None
+    sync_interval: int | None = None
+    url: str | None = None
+    file_content: str | None = None
+    unset_sync_interval: bool = False
 
 
 class DomainRepository(ABC):
@@ -54,6 +78,46 @@ class DomainRepository(ABC):
     @abstractmethod
     async def sync_auto_domains(self, names: set[str]) -> AutoSyncResult:
         """Replace auto domain set; skip names that exist as manual."""
+
+    @abstractmethod
+    async def sync_list_domains(self, list_id: int, names: set[str]) -> AutoSyncResult:
+        """Replace domains for one list; skip names that exist as manual."""
+
+    @abstractmethod
+    async def clear_list_domains(self, list_id: int) -> int:
+        """Remove all domains belonging to list_id. Return count removed."""
+
+    @abstractmethod
+    async def list_domain_lists(self) -> list[DomainList]:
+        ...
+
+    @abstractmethod
+    async def get_domain_list(self, list_id: int) -> DomainList | None:
+        ...
+
+    @abstractmethod
+    async def add_domain_list(self, data: DomainListCreate) -> DomainList:
+        ...
+
+    @abstractmethod
+    async def update_domain_list(self, list_id: int, data: DomainListUpdate) -> DomainList | None:
+        ...
+
+    @abstractmethod
+    async def remove_domain_list(self, list_id: int) -> bool:
+        """Delete list and its domains."""
+
+    @abstractmethod
+    async def mark_list_synced(self, list_id: int, synced_at: datetime) -> None:
+        ...
+
+    @abstractmethod
+    async def get_default_sync_interval(self) -> int:
+        ...
+
+    @abstractmethod
+    async def set_default_sync_interval(self, seconds: int) -> None:
+        ...
 
     @abstractmethod
     async def list_exclude_keywords(self) -> list[str]:

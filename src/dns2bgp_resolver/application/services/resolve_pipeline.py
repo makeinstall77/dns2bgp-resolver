@@ -9,7 +9,7 @@ from dns2bgp_resolver.application.ports.dns_resolver import DnsResolver
 from dns2bgp_resolver.application.ports.repository import DomainRepository
 from dns2bgp_resolver.application.ports.route_exporter import RouteExporter
 from dns2bgp_resolver.config import RefreshSettings
-from dns2bgp_resolver.domain import Domain, DomainName
+from dns2bgp_resolver.domain import Domain, DomainName, ip_to_prefix24
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ class ResolvePipeline:
 
     async def export_routes(self) -> ExportSummary:
         ips = await self._repository.all_active_ips()
-        prefixes = [f"{ip}/32" for ip in sorted(set(ips))]
+        prefixes = sorted({ip_to_prefix24(ip) for ip in ips})
         await self._exporter.export(prefixes)
         return ExportSummary(prefix_count=len(prefixes), path=self._export_path)
 

@@ -27,11 +27,27 @@ from dns2bgp_resolver.application.commands import (
     SearchAutoDomainsHandler,
     SyncAutoListCommand,
     SyncAutoListHandler,
+    ListDomainListsCommand,
+    ListDomainListsHandler,
+    AddDomainListCommand,
+    AddDomainListHandler,
+    UpdateDomainListCommand,
+    UpdateDomainListHandler,
+    RemoveDomainListCommand,
+    RemoveDomainListAndExportHandler,
+    ClearDomainListCommand,
+    ClearDomainListHandler,
+    SyncDomainListCommand,
+    SyncDomainListHandler,
+    GetSettingsCommand,
+    GetSettingsHandler,
+    SetDefaultSyncIntervalCommand,
+    SetDefaultSyncIntervalHandler,
 )
 from dns2bgp_resolver.application.commands.dto import domain_to_view
 from dns2bgp_resolver.application.ports.clock import SystemClock
 from dns2bgp_resolver.application.ports.repository import DomainRepository
-from dns2bgp_resolver.application.services.auto_list_sync import AutoListSyncService
+from dns2bgp_resolver.application.services.auto_list_sync import DomainListSyncService
 from dns2bgp_resolver.application.services.resolve_pipeline import ResolvePipeline
 from dns2bgp_resolver.config import Settings
 from dns2bgp_resolver.domain import DomainName
@@ -49,7 +65,7 @@ class AppContainer:
     bus: CommandBus
     pipeline: ResolvePipeline
     scheduler: RefreshScheduler
-    auto_sync_service: AutoListSyncService
+    auto_sync_service: DomainListSyncService
     auto_sync_scheduler: AutoListSyncScheduler
 
     async def startup(self) -> None:
@@ -65,6 +81,7 @@ class AppContainer:
         bird_dir.chmod(0o755)
         await self.repository.initialize()
         await self._seed_exclude_keywords()
+        await self._seed_domain_lists()
 
     async def _seed_exclude_keywords(self) -> None:
         existing = await self.repository.list_exclude_keywords()
@@ -72,6 +89,16 @@ class AppContainer:
             return
         for keyword in self.settings.auto_list.exclude_keywords:
             await self.repository.add_exclude_keyword(keyword)
+
+    async def _seed_domain_lists(self) -> None:
+        if not hasattr(self.repository, "seed_domain_list"):
+            return
+        await self.repository.seed_domain_list(  # type: ignore[attr-defined]
+            name="antifilter",
+            list_type="url",
+            url=self.settings.auto_list.url,
+            sync_interval=self.settings.auto_list.sync_interval,
+        )
 
     async def shutdown(self) -> None:
         await self.auto_sync_scheduler.stop()
@@ -126,10 +153,11 @@ def build_container(settings: Settings | None = None) -> AppContainer:
         refresh=settings.refresh,
         export_path=settings.bird.include_path,
     )
-    auto_sync_service = AutoListSyncService(
+    auto_sync_service = DomainListSyncService(
         repository=repository,
         pipeline=pipeline,
         settings=settings.auto_list,
+        clock=clock,
     )
     bus = CommandBus()
     bus.register(AddDomainCommand, AddDomainAndResolveHandler(repository, pipeline))
@@ -139,6 +167,14 @@ def build_container(settings: Settings | None = None) -> AppContainer:
     bus.register(ExportRoutesCommand, ExportRoutesHandler(pipeline))
     bus.register(SearchAutoDomainsCommand, SearchAutoDomainsHandler(repository))
     bus.register(SyncAutoListCommand, SyncAutoListHandler(auto_sync_service))
+    bus.register(SyncDomainListCommand, SyncDomainListHandler(auto_sync_service))
+    bus.register(ListDomainListsCommand, ListDomainListsHandler(repository))
+    bus.register(AddDomainListCommand, AddDomainListHandler(repository))
+    bus.register(UpdateDomainListCommand, UpdateDomainListHandler(repository))
+    bus.register(RemoveDomainListCommand, RemoveDomainListAndExportHandler(repository, pipeline))
+    bus.register(ClearDomainListCommand, ClearDomainListHandler(repository, pipeline))
+    bus.register(GetSettingsCommand, GetSettingsHandler(repository))
+    bus.register(SetDefaultSyncIntervalCommand, SetDefaultSyncIntervalHandler(repository))
     bus.register(ListExcludeKeywordsCommand, ListExcludeKeywordsHandler(repository))
     bus.register(AddExcludeKeywordCommand, AddExcludeKeywordHandler(repository))
     bus.register(RemoveExcludeKeywordCommand, RemoveExcludeKeywordHandler(repository))
@@ -146,7 +182,7 @@ def build_container(settings: Settings | None = None) -> AppContainer:
     scheduler = RefreshScheduler(pipeline)
     auto_sync_scheduler = AutoListSyncScheduler(
         auto_sync_service,
-        sync_interval=settings.auto_list.sync_interval,
+        repository,
         sync_on_startup=settings.auto_list.sync_on_startup,
     )
     return AppContainer(

@@ -3,21 +3,29 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Form, Header, HTTPException, Query, Request, status
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from dns2bgp_resolver.application.commands import (
     AddDomainCommand,
+    AddDomainListCommand,
     AddExcludeKeywordCommand,
+    ClearDomainListCommand,
+    GetSettingsCommand,
+    ListDomainListsCommand,
     ListDomainsCommand,
     ListExcludeKeywordsCommand,
     RemoveDomainCommand,
+    RemoveDomainListCommand,
     RemoveExcludeKeywordCommand,
     ResolveNowCommand,
     SearchAutoDomainsCommand,
+    SetDefaultSyncIntervalCommand,
     SyncAutoListCommand,
+    SyncDomainListCommand,
+    UpdateDomainListCommand,
 )
 from dns2bgp_resolver.container import AppContainer
 
@@ -31,6 +39,27 @@ class DomainCreate(BaseModel):
 
 class KeywordCreate(BaseModel):
     keyword: str = Field(min_length=1, max_length=64)
+
+
+class DomainListCreateBody(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    type: str = Field(pattern="^(url|file)$")
+    url: str | None = None
+    file_content: str | None = None
+    sync_interval: int | None = None
+
+
+class DomainListUpdateBody(BaseModel):
+    name: str | None = None
+    enabled: bool | None = None
+    sync_interval: int | None = None
+    url: str | None = None
+    file_content: str | None = None
+    clear_sync_interval: bool = False
+
+
+class SettingsUpdateBody(BaseModel):
+    default_sync_interval: int = Field(ge=60)
 
 
 def create_app(container: AppContainer) -> FastAPI:
@@ -47,6 +76,207 @@ def create_app(container: AppContainer) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid api key")
 
     Auth = Annotated[None, Depends(require_api_key)]
+
+    def _check_form_api_key(api_key: str) -> None:
+        expected = container.settings.web.api_key
+        if expected and api_key != expected:
+            raise HTTPException(status_code=401, detail="invalid api key")
+
+    @app.get("/settings", response_class=HTMLResponse)
+    async def settings_page(request: Request) -> HTMLResponse:
+        lists_result = await container.bus.execute(ListDomainListsCommand())
+        settings_result = await container.bus.execute(GetSettingsCommand())
+        lists = lists_result.data or []
+        default_interval = (
+            settings_result.data.default_sync_interval if settings_result.data else 86400
+        )
+        return templates.TemplateResponse(
+            request,
+            "settings.html",
+            {
+                "lists": lists,
+                "default_interval": default_interval,
+                "api_key": container.settings.web.api_key,
+                "error": request.query_params.get("error"),
+                "message": request.query_params.get("message"),
+            },
+        )
+
+    @app.post("/ui/settings/interval")
+    async def ui_settings_interval(
+        seconds: Annotated[int, Form()],
+        api_key: Annotated[str, Form()] = "",
+    ) -> RedirectResponse:
+        _check_form_api_key(api_key)
+        result = await container.bus.execute(SetDefaultSyncIntervalCommand(seconds=seconds))
+        if not result.ok:
+            return RedirectResponse(url=f"/settings?error={result.error}", status_code=303)
+        return RedirectResponse(url=f"/settings?message={result.message}", status_code=303)
+
+    @app.post("/ui/lists/add-url")
+    async def ui_lists_add_url(
+        name: Annotated[str, Form()],
+        url: Annotated[str, Form()],
+        api_key: Annotated[str, Form()] = "",
+    ) -> RedirectResponse:
+        _check_form_api_key(api_key)
+        result = await container.bus.execute(
+            AddDomainListCommand(name=name.strip(), type="url", url=url.strip())
+        )
+        if not result.ok:
+            return RedirectResponse(url=f"/settings?error={result.error}", status_code=303)
+        return RedirectResponse(url=f"/settings?message={result.message}", status_code=303)
+
+    @app.post("/ui/lists/add-file")
+    async def ui_lists_add_file(
+        file: Annotated[UploadFile, File()],
+        name: Annotated[str, Form()] = "",
+        api_key: Annotated[str, Form()] = "",
+    ) -> RedirectResponse:
+        _check_form_api_key(api_key)
+        content = (await file.read()).decode("utf-8", errors="replace")
+        list_name = name.strip() or (file.filename or "upload").rsplit(".", 1)[0]
+        result = await container.bus.execute(
+            AddDomainListCommand(name=list_name, type="file", file_content=content)
+        )
+        if not result.ok:
+            return RedirectResponse(url=f"/settings?error={result.error}", status_code=303)
+        return RedirectResponse(url=f"/settings?message={result.message}", status_code=303)
+
+    @app.post("/ui/lists/toggle")
+    async def ui_lists_toggle(
+        id: Annotated[int, Form()],
+        enabled: Annotated[str, Form()],
+        api_key: Annotated[str, Form()] = "",
+    ) -> RedirectResponse:
+        _check_form_api_key(api_key)
+        result = await container.bus.execute(
+            UpdateDomainListCommand(id=id, enabled=enabled == "1")
+        )
+        if not result.ok:
+            return RedirectResponse(url=f"/settings?error={result.error}", status_code=303)
+        return RedirectResponse(url="/settings", status_code=303)
+
+    @app.post("/ui/lists/sync")
+    async def ui_lists_sync(
+        id: Annotated[int, Form()],
+        api_key: Annotated[str, Form()] = "",
+    ) -> RedirectResponse:
+        _check_form_api_key(api_key)
+        result = await container.bus.execute(SyncDomainListCommand(id=id))
+        if not result.ok:
+            return RedirectResponse(url=f"/settings?error={result.error}", status_code=303)
+        return RedirectResponse(url=f"/settings?message={result.message}", status_code=303)
+
+    @app.post("/ui/lists/sync-all")
+    async def ui_lists_sync_all(api_key: Annotated[str, Form()] = "") -> RedirectResponse:
+        _check_form_api_key(api_key)
+        result = await container.bus.execute(SyncDomainListCommand())
+        if not result.ok:
+            return RedirectResponse(url=f"/settings?error={result.error}", status_code=303)
+        return RedirectResponse(url=f"/settings?message={result.message}", status_code=303)
+
+    @app.post("/ui/lists/clear")
+    async def ui_lists_clear(
+        id: Annotated[int, Form()],
+        api_key: Annotated[str, Form()] = "",
+    ) -> RedirectResponse:
+        _check_form_api_key(api_key)
+        result = await container.bus.execute(ClearDomainListCommand(id=id))
+        if not result.ok:
+            return RedirectResponse(url=f"/settings?error={result.error}", status_code=303)
+        return RedirectResponse(url=f"/settings?message={result.message}", status_code=303)
+
+    @app.post("/ui/lists/remove")
+    async def ui_lists_remove(
+        id: Annotated[int, Form()],
+        api_key: Annotated[str, Form()] = "",
+    ) -> RedirectResponse:
+        _check_form_api_key(api_key)
+        result = await container.bus.execute(RemoveDomainListCommand(id=id))
+        if not result.ok:
+            return RedirectResponse(url=f"/settings?error={result.error}", status_code=303)
+        return RedirectResponse(url=f"/settings?message={result.message}", status_code=303)
+
+    @app.get("/api/lists")
+    async def api_lists(_: Auth):
+        result = await container.bus.execute(ListDomainListsCommand())
+        if not result.ok:
+            raise HTTPException(status_code=500, detail=result.error)
+        settings = await container.bus.execute(GetSettingsCommand())
+        return {
+            "items": [item.__dict__ for item in (result.data or [])],
+            "default_sync_interval": settings.data.default_sync_interval if settings.data else 86400,
+        }
+
+    @app.post("/api/lists", status_code=201)
+    async def api_lists_add(body: DomainListCreateBody, _: Auth):
+        result = await container.bus.execute(
+            AddDomainListCommand(
+                name=body.name,
+                type=body.type,
+                url=body.url,
+                file_content=body.file_content,
+                sync_interval=body.sync_interval,
+            )
+        )
+        if not result.ok:
+            raise HTTPException(status_code=400, detail=result.error)
+        return result.data.__dict__ if result.data else {}
+
+    @app.patch("/api/lists/{list_id}")
+    async def api_lists_update(list_id: int, body: DomainListUpdateBody, _: Auth):
+        result = await container.bus.execute(
+            UpdateDomainListCommand(
+                id=list_id,
+                name=body.name,
+                enabled=body.enabled,
+                sync_interval=body.sync_interval,
+                url=body.url,
+                file_content=body.file_content,
+                clear_sync_interval=body.clear_sync_interval,
+            )
+        )
+        if not result.ok:
+            raise HTTPException(status_code=404, detail=result.error)
+        return result.data.__dict__ if result.data else {}
+
+    @app.delete("/api/lists/{list_id}")
+    async def api_lists_remove(list_id: int, _: Auth):
+        result = await container.bus.execute(RemoveDomainListCommand(id=list_id))
+        if not result.ok:
+            raise HTTPException(status_code=404, detail=result.error)
+        return {"removed": result.data}
+
+    @app.post("/api/lists/{list_id}/sync")
+    async def api_lists_sync(list_id: int, _: Auth):
+        result = await container.bus.execute(SyncDomainListCommand(id=list_id))
+        if not result.ok:
+            raise HTTPException(status_code=500, detail=result.error)
+        return result.data.__dict__ if result.data else {}
+
+    @app.post("/api/lists/{list_id}/clear")
+    async def api_lists_clear(list_id: int, _: Auth):
+        result = await container.bus.execute(ClearDomainListCommand(id=list_id))
+        if not result.ok:
+            raise HTTPException(status_code=404, detail=result.error)
+        return {"cleared": result.data}
+
+    @app.get("/api/settings")
+    async def api_settings_get(_: Auth):
+        result = await container.bus.execute(GetSettingsCommand())
+        if not result.ok:
+            raise HTTPException(status_code=500, detail=result.error)
+        return result.data.__dict__ if result.data else {}
+
+    @app.patch("/api/settings")
+    async def api_settings_patch(body: SettingsUpdateBody, _: Auth):
+        result = await container.bus.execute(
+            SetDefaultSyncIntervalCommand(seconds=body.default_sync_interval)
+        )
+        if not result.ok:
+            raise HTTPException(status_code=400, detail=result.error)
+        return result.data.__dict__ if result.data else {}
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request, tab: str = "manual") -> HTMLResponse:

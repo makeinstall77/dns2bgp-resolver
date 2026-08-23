@@ -26,7 +26,7 @@ class RemoveDomainHandler:
         if existing is None:
             return CommandResult.failure(f"domain not found: {name}")
         if existing.source == "auto":
-            return CommandResult.failure(f"domain is managed by auto sync: {name}")
+            return CommandResult.failure(f"domain is managed by a domain list: {name}")
 
         removed = await self._repository.remove(name)
         if not removed:
