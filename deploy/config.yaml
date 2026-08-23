@@ -14,8 +14,9 @@ bird:
   protocol_name: dns2bgp
   table: master4
   nexthop: "wg0"
-  birdc_enable: false
+  birdc_enable: true
   birdc_bin: birdc
+  birdc_socket: "/run/bird/bird.ctl"
 
 web:
   host: "127.0.0.1"
