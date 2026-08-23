@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove|purge|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        systemctl daemon-reload 2>/dev/null || true
+        ;;
+esac
+
+if [ "$1" = "purge" ]; then
+    rm -rf /etc/dns2bgp
+fi
+
+exit 0
