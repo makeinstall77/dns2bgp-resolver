@@ -80,6 +80,7 @@ mkdir -p \
 "$PYTHON" -m venv "${STAGING}/opt/dns2bgp/.venv"
 "${STAGING}/opt/dns2bgp/.venv/bin/pip" install -q --upgrade pip
 "${STAGING}/opt/dns2bgp/.venv/bin/pip" install -q "$WHEEL"
+sed -i '1s|.*|#!/opt/dns2bgp/.venv/bin/python3|' "${STAGING}/opt/dns2bgp/.venv/bin/dns2bgp"
 
 install -m 0644 "${ROOT}/deploy/config.yaml" "${STAGING}/etc/dns2bgp/config.yaml"
 install -m 0644 "${ROOT}/deploy/dns2bgp.service" "${STAGING}/lib/systemd/system/dns2bgp.service"
