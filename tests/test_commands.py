@@ -99,8 +99,8 @@ async def test_add_resolve_export(bus, bird_path: Path):
     assert set(result.data.addresses) == {"1.2.3.4", "1.2.3.5"}
     assert bird_path.is_file()
     text = bird_path.read_text(encoding="utf-8")
-    assert "route 1.2.3.4/32 via \"wg0\";" in text
-    assert "route 1.2.3.5/32 via \"wg0\";" in text
+    assert "route 1.2.3.4/32 reject;" in text
+    assert "route 1.2.3.5/32 reject;" in text
 
 
 @pytest.mark.asyncio

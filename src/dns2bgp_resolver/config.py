@@ -27,8 +27,9 @@ class BirdSettings(BaseModel):
     protocol_name: str = "dns2bgp"
     table: str = "master4"
     nexthop: str = "wg0"
-    birdc_enable: bool = False
+    birdc_enable: bool = True
     birdc_bin: str = "birdc"
+    birdc_socket: str = "/run/bird/bird.ctl"
 
 
 class WebSettings(BaseModel):
