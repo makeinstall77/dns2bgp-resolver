@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select, text
@@ -16,7 +18,10 @@ from dns2bgp_resolver.infrastructure.db.models import (
     DomainRow,
 )
 
+logger = logging.getLogger(__name__)
+
 _BATCH_SIZE = 500
+_SQLITE_BUSY_TIMEOUT_MS = 30_000
 
 
 def _ensure_aware(dt: datetime | None) -> datetime | None:
@@ -47,10 +52,23 @@ class SqlAlchemyDomainRepository(DomainRepository):
     """Works with SQLite and PostgreSQL via SQLAlchemy async URL."""
 
     def __init__(self, database_url: str) -> None:
-        self._engine = create_async_engine(database_url, echo=False)
+        connect_args: dict[str, float] = {}
+        if database_url.startswith("sqlite"):
+            connect_args["timeout"] = 30.0
+        self._engine = create_async_engine(database_url, echo=False, connect_args=connect_args)
         self._session_factory = async_sessionmaker(
             self._engine, class_=AsyncSession, expire_on_commit=False
         )
+        self._write_lock = asyncio.Lock()
+
+    @property
+    def sync_in_progress(self) -> bool:
+        return self._write_lock.locked()
+
+    async def _configure_sqlite(self, conn) -> None:
+        await conn.execute(text(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}"))
+        await conn.execute(text("PRAGMA journal_mode=WAL"))
+        await conn.execute(text("PRAGMA synchronous=NORMAL"))
 
     async def initialize(self) -> None:
         async with self._engine.begin() as conn:
@@ -68,6 +86,7 @@ class SqlAlchemyDomainRepository(DomainRepository):
                     await conn.execute(
                         text("CREATE INDEX IF NOT EXISTS ix_domains_source ON domains (source)")
                     )
+                await self._configure_sqlite(conn)
             elif conn.dialect.name == "postgresql":
                 result = await conn.execute(
                     text(
@@ -153,42 +172,55 @@ class SqlAlchemyDomainRepository(DomainRepository):
             return [_row_to_domain(r) for r in rows], total
 
     async def sync_auto_domains(self, names: set[str]) -> AutoSyncResult:
-        async with self._session_factory() as session:
-            manual_result = await session.execute(
-                select(DomainRow.name).where(DomainRow.source == "manual")
-            )
-            manual_names = {row[0] for row in manual_result.fetchall()}
+        async with self._write_lock:
+            async with self._session_factory() as session:
+                manual_result = await session.execute(
+                    select(DomainRow.name).where(DomainRow.source == "manual")
+                )
+                manual_names = {row[0] for row in manual_result.fetchall()}
+
             skipped_manual = len(names & manual_names)
             target = names - manual_names
 
-            current_result = await session.execute(
-                select(DomainRow).where(DomainRow.source == "auto")
-            )
-            current_rows = {row.name: row for row in current_result.scalars().all()}
+            async with self._engine.begin() as conn:
+                if conn.dialect.name == "sqlite":
+                    await self._configure_sqlite(conn)
 
-            to_remove = set(current_rows) - target
-            to_add = target - set(current_rows)
+                await conn.execute(
+                    text(
+                        "CREATE TEMP TABLE IF NOT EXISTS sync_target "
+                        "(name VARCHAR(253) PRIMARY KEY)"
+                    )
+                )
+                await conn.execute(text("DELETE FROM sync_target"))
+                target_list = sorted(target)
+                for offset in range(0, len(target_list), _BATCH_SIZE):
+                    batch = target_list[offset : offset + _BATCH_SIZE]
+                    await conn.execute(
+                        text("INSERT INTO sync_target (name) VALUES (:name)"),
+                        [{"name": name} for name in batch],
+                    )
 
-            for name in to_remove:
-                await session.delete(current_rows[name])
+                remove_result = await conn.execute(
+                    text(
+                        "DELETE FROM domains WHERE source = 'auto' "
+                        "AND name NOT IN (SELECT name FROM sync_target)"
+                    )
+                )
+                removed = remove_result.rowcount if remove_result.rowcount >= 0 else 0
 
-            added = 0
-            batch: list[DomainRow] = []
-            for name in sorted(to_add):
-                batch.append(DomainRow(name=name, source="auto", enabled=True))
-                if len(batch) >= _BATCH_SIZE:
-                    session.add_all(batch)
-                    await session.flush()
-                    added += len(batch)
-                    batch.clear()
-            if batch:
-                session.add_all(batch)
-                added += len(batch)
+                add_result = await conn.execute(
+                    text(
+                        "INSERT INTO domains (name, source, enabled) "
+                        "SELECT t.name, 'auto', 1 FROM sync_target t "
+                        "WHERE NOT EXISTS (SELECT 1 FROM domains d WHERE d.name = t.name)"
+                    )
+                )
+                added = add_result.rowcount if add_result.rowcount >= 0 else 0
 
-            await session.commit()
             return AutoSyncResult(
                 added=added,
-                removed=len(to_remove),
+                removed=removed,
                 skipped_manual=skipped_manual,
             )
 
@@ -231,6 +263,9 @@ class SqlAlchemyDomainRepository(DomainRepository):
             return True
 
     async def list_due(self, now: datetime) -> list[Domain]:
+        if self.sync_in_progress:
+            logger.debug("skipping list_due while auto sync is in progress")
+            return []
         async with self._session_factory() as session:
             result = await session.execute(
                 select(DomainRow)
