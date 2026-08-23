@@ -37,7 +37,11 @@ class AutoListSyncScheduler:
     async def stop(self) -> None:
         self._stop.set()
         if self._task is not None:
-            await self._task
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
             self._task = None
 
     async def sync_now(self) -> None:
