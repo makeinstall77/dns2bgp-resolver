@@ -99,8 +99,8 @@ async def test_add_resolve_export(bus, bird_path: Path):
     assert set(result.data.addresses) == {"1.2.3.4", "1.2.3.5"}
     assert bird_path.is_file()
     text = bird_path.read_text(encoding="utf-8")
-    assert "route 1.2.3.4/32 reject;" in text
-    assert "route 1.2.3.5/32 reject;" in text
+    assert "route 1.2.3.0/24 reject;" in text
+    assert "route 1.2.3.4/32" not in text
 
 
 @pytest.mark.asyncio
@@ -136,7 +136,7 @@ async def test_resolve_change_triggers_export(pipeline, repo, bird_path: Path):
     dns.mapping["example.com"] = [("9.9.9.9", 60)]
     third = await pipe.resolve_one(DomainName("example.com"))
     assert third.changed
-    assert "9.9.9.9/32" in bird_path.read_text(encoding="utf-8")
+    assert "9.9.9.0/24" in bird_path.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio

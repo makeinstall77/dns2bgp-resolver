@@ -19,12 +19,38 @@ class Base(DeclarativeBase):
     pass
 
 
+class DomainListRow(Base):
+    __tablename__ = "domain_lists"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    type: Mapped[str] = mapped_column(String(8), nullable=False)
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sync_interval: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class AppSettingRow(Base):
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class DomainRow(Base):
     __tablename__ = "domains"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(253), unique=True, nullable=False, index=True)
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="manual", index=True)
+    list_id: Mapped[int | None] = mapped_column(
+        ForeignKey("domain_lists.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

@@ -1,0 +1,141 @@
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+
+BTN_DOMAINS = "Домены"
+BTN_AUTO = "Auto"
+BTN_LISTS = "Списки"
+BTN_SETTINGS = "Настройки"
+BTN_RESOLVE = "Resolve all"
+BTN_CANCEL = "◀ Отмена"
+
+
+def main_menu_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=BTN_DOMAINS), KeyboardButton(text=BTN_AUTO)],
+            [KeyboardButton(text=BTN_LISTS), KeyboardButton(text=BTN_SETTINGS)],
+            [KeyboardButton(text=BTN_RESOLVE)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def cancel_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=BTN_CANCEL)]],
+        resize_keyboard=True,
+    )
+
+
+def back_inline() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="◀ Назад", callback_data="m:main")]]
+    )
+
+
+def domains_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="List", callback_data="d:list"),
+                InlineKeyboardButton(text="Add", callback_data="d:add"),
+                InlineKeyboardButton(text="Remove", callback_data="d:rm"),
+            ],
+            [InlineKeyboardButton(text="◀ Назад", callback_data="m:main")],
+        ]
+    )
+
+
+def auto_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Search", callback_data="a:search"),
+                InlineKeyboardButton(text="Filters", callback_data="a:filters"),
+            ],
+            [InlineKeyboardButton(text="◀ Назад", callback_data="m:main")],
+        ]
+    )
+
+
+def lists_menu(list_buttons: list[InlineKeyboardButton]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for i in range(0, len(list_buttons), 2):
+        rows.append(list_buttons[i : i + 2])
+    rows.append(
+        [
+            InlineKeyboardButton(text="Add URL", callback_data="l:addurl"),
+            InlineKeyboardButton(text="Upload file", callback_data="l:upload"),
+        ]
+    )
+    rows.append([InlineKeyboardButton(text="Sync all", callback_data="l:syncall")])
+    rows.append([InlineKeyboardButton(text="◀ Назад", callback_data="m:main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def list_detail_menu(list_id: int, enabled: bool) -> InlineKeyboardMarkup:
+    toggle = "Disable" if enabled else "Enable"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text=toggle, callback_data=f"l:en:{list_id}"),
+                InlineKeyboardButton(text="Sync", callback_data=f"l:sync:{list_id}"),
+            ],
+            [
+                InlineKeyboardButton(text="Clear", callback_data=f"l:clr:{list_id}"),
+                InlineKeyboardButton(text="Delete", callback_data=f"l:del:{list_id}"),
+            ],
+            [
+                InlineKeyboardButton(text="Interval", callback_data=f"l:int:{list_id}"),
+                InlineKeyboardButton(text="◀ Lists", callback_data="m:lists"),
+            ],
+        ]
+    )
+
+
+def confirm_menu(action: str, list_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Да", callback_data=f"l:cf:{action}:{list_id}:yes"),
+                InlineKeyboardButton(text="Отмена", callback_data=f"l:view:{list_id}"),
+            ]
+        ]
+    )
+
+
+def settings_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Default interval", callback_data="st:interval")],
+            [InlineKeyboardButton(text="Exclude keywords", callback_data="st:filters")],
+            [InlineKeyboardButton(text="◀ Назад", callback_data="m:main")],
+        ]
+    )
+
+
+def filters_menu(keywords: list[str]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for kw in keywords[:20]:
+        rows.append([InlineKeyboardButton(text=f"✕ {kw}", callback_data=f"f:rm:{kw}")])
+    rows.append(
+        [
+            InlineKeyboardButton(text="Add", callback_data="f:add"),
+            InlineKeyboardButton(text="◀ Назад", callback_data="m:auto"),
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def search_keyboard(query_key: str, page: int, pages: int) -> InlineKeyboardMarkup:
+    buttons: list[InlineKeyboardButton] = []
+    if page > 1:
+        buttons.append(
+            InlineKeyboardButton(text="◀ Prev", callback_data=f"s:{page - 1}:{query_key}")
+        )
+    if page < pages:
+        buttons.append(
+            InlineKeyboardButton(text="Next ▶", callback_data=f"s:{page + 1}:{query_key}")
+        )
+    nav = [buttons] if buttons else []
+    nav.append([InlineKeyboardButton(text="◀ Auto", callback_data="m:auto")])
+    return InlineKeyboardMarkup(inline_keyboard=nav)
