@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dns2bgp-resolver — auto</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --text: #e7ecf3;
+      --muted: #8b9bb4;
+      --accent: #3d9cf0;
+      --danger: #e85d5d;
+      --border: #2a3548;
+      --mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+      --sans: "IBM Plex Sans", "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #1c3a5a 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #1a2e28 0%, transparent 50%),
+        var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    main {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 2.5rem 1.25rem 4rem;
+    }
+    h1 { font-size: 1.75rem; margin: 0 0 0.35rem; }
+    .sub { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.95rem; }
+    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+    .tabs a {
+      color: var(--muted);
+      text-decoration: none;
+      padding: 0.5rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+    .tabs a.active { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+    form.search, form.add-filter {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.65rem;
+      margin-bottom: 1rem;
+    }
+    input[type="text"], input[type="password"] {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.7rem 0.85rem;
+      border-radius: 6px;
+      font-family: var(--mono);
+      font-size: 0.9rem;
+    }
+    button {
+      background: var(--accent);
+      color: #041018;
+      border: none;
+      border-radius: 6px;
+      padding: 0.7rem 1.1rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+    }
+    button.danger {
+      background: transparent;
+      color: var(--danger);
+      border: 1px solid var(--danger);
+      padding: 0.35rem 0.65rem;
+      font-size: 0.8rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: color-mix(in srgb, var(--panel) 80%, transparent);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 1rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.75rem 0.9rem;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--muted); font-weight: 500; font-size: 0.8rem; text-transform: uppercase; }
+    tr:last-child td { border-bottom: none; }
+    .ips { font-family: var(--mono); font-size: 0.85rem; color: #b8d4f0; }
+    .err { color: var(--danger); font-size: 0.85rem; margin-bottom: 1rem; }
+    .msg { color: #7dd3a0; font-size: 0.85rem; margin-bottom: 1rem; }
+    .key-row { display: flex; gap: 0.65rem; margin-bottom: 1rem; align-items: center; }
+    .key-row label { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+    .empty { color: var(--muted); padding: 1rem 0; }
+    .panel {
+      background: color-mix(in srgb, var(--panel) 80%, transparent);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .panel h2 { font-size: 1rem; margin: 0 0 0.75rem; }
+    .filters { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .filter-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      background: color-mix(in srgb, var(--panel) 60%, transparent);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.25rem 0.5rem;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+    }
+    .filter-tag form { margin: 0; display: inline; }
+    .pagination { display: flex; gap: 0.5rem; align-items: center; color: var(--muted); font-size: 0.9rem; }
+    .pagination a {
+      color: var(--accent);
+      text-decoration: none;
+      padding: 0.35rem 0.65rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+    .meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.75rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>dns2bgp-resolver</h1>
+    <p class="sub">Auto domains synced daily from antifilter.download</p>
+
+    <nav class="tabs">
+      <a href="/">Manual</a>
+      <a href="/auto" class="active">Auto</a>
+    </nav>
+
+    <div class="key-row">
+      <label for="api_key_store">API key</label>
+      <input type="password" id="api_key_store" placeholder="from config" style="flex:1" />
+    </div>
+
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+    {% if message %}<div class="msg">{{ message }}</div>{% endif %}
+
+    <div class="panel">
+      <h2>Exclude keywords</h2>
+      <div class="filters">
+        {% for kw in filters %}
+        <span class="filter-tag">
+          {{ kw }}
+          <form method="post" action="/ui/auto/filter/remove">
+            <input type="hidden" name="keyword" value="{{ kw }}" />
+            <input type="hidden" name="q" value="{{ query }}" />
+            <input type="hidden" name="page" value="{{ search.page if search else 1 }}" />
+            <input type="hidden" name="api_key" class="api_key_field" value="" />
+            <button class="danger" type="submit">×</button>
+          </form>
+        </span>
+        {% else %}
+        <span class="empty">No keywords configured.</span>
+        {% endfor %}
+      </div>
+      <form class="add-filter" method="post" action="/ui/auto/filter/add">
+        <input type="hidden" name="q" value="{{ query }}" />
+        <input type="hidden" name="page" value="{{ search.page if search else 1 }}" />
+        <input type="hidden" name="api_key" class="api_key_field" value="" />
+        <input type="text" name="keyword" placeholder="casino" required />
+        <button type="submit">Add keyword</button>
+      </form>
+    </div>
+
+    <form class="search" method="get" action="/auto">
+      <input type="text" name="q" value="{{ query }}" placeholder="Filter by domain substring..." />
+      <button type="submit">Search</button>
+    </form>
+
+    <form method="post" action="/ui/auto/sync" style="margin-bottom:1rem">
+      <input type="hidden" name="q" value="{{ query }}" />
+      <input type="hidden" name="page" value="{{ search.page if search else 1 }}" />
+      <input type="hidden" name="api_key" class="api_key_field" value="" />
+      <button type="submit" class="secondary">Sync now</button>
+    </form>
+
+    {% if search %}
+    <div class="meta">{{ search.total }} domain(s) — page {{ search.page }}/{{ search.pages }}</div>
+    {% endif %}
+
+    {% if search and search.items %}
+    <table>
+      <thead>
+        <tr>
+          <th>Domain</th>
+          <th>Addresses</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in search.items %}
+        <tr>
+          <td>
+            {{ d.name }}
+            {% if d.last_error %}<div class="err">{{ d.last_error }}</div>{% endif %}
+          </td>
+          <td class="ips">
+            {% if d.addresses %}{{ d.addresses | join(", ") }}{% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% elif search %}
+    <p class="empty">No auto domains match.</p>
+    {% endif %}
+
+    {% if search and search.pages > 1 %}
+    <div class="pagination">
+      {% if search.page > 1 %}
+      <a href="/auto?q={{ query }}&page={{ search.page - 1 }}">← Prev</a>
+      {% endif %}
+      <span>Page {{ search.page }} / {{ search.pages }}</span>
+      {% if search.page < search.pages %}
+      <a href="/auto?q={{ query }}&page={{ search.page + 1 }}">Next →</a>
+      {% endif %}
+    </div>
+    {% endif %}
+  </main>
+  <script>
+    const store = document.getElementById("api_key_store");
+    const saved = localStorage.getItem("dns2bgp_api_key") || "";
+    store.value = saved;
+    document.querySelectorAll(".api_key_field").forEach(el => el.value = saved);
+    store.addEventListener("change", () => {
+      localStorage.setItem("dns2bgp_api_key", store.value);
+      document.querySelectorAll(".api_key_field").forEach(el => el.value = store.value);
+    });
+  </script>
+</body>
+</html>

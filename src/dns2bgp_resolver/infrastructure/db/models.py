@@ -24,6 +24,7 @@ class DomainRow(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(253), unique=True, nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="manual", index=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -62,3 +63,10 @@ class AddressRow(Base):
     )
 
     domain: Mapped[DomainRow] = relationship("DomainRow", back_populates="addresses")
+
+
+class AutoExcludeKeywordRow(Base):
+    __tablename__ = "auto_exclude_keywords"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    keyword: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)

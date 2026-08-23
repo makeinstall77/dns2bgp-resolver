@@ -27,10 +27,27 @@ class CommandResult(Generic[T]):
 class DomainView:
     name: str
     enabled: bool
+    source: str = "manual"
     addresses: list[str] = field(default_factory=list)
     next_resolve_at: str | None = None
     last_resolved_at: str | None = None
     last_error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AutoDomainSearchView:
+    items: list[DomainView]
+    total: int
+    page: int
+    pages: int
+    page_size: int
+
+
+@dataclass(frozen=True, slots=True)
+class AutoSyncView:
+    added: int
+    removed: int
+    skipped_manual: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +72,7 @@ def domain_to_view(domain: Any) -> DomainView:
     return DomainView(
         name=str(domain.name),
         enabled=domain.enabled,
+        source=domain.source,
         addresses=[str(a.ip) for a in domain.addresses],
         next_resolve_at=domain.next_resolve_at.isoformat() if domain.next_resolve_at else None,
         last_resolved_at=domain.last_resolved_at.isoformat() if domain.last_resolved_at else None,
