@@ -11,7 +11,7 @@ from dns2bgp_resolver.application.ports.dns_resolver import DnsResolver
 from dns2bgp_resolver.application.ports.repository import DomainRepository
 from dns2bgp_resolver.application.ports.route_exporter import RouteExporter
 from dns2bgp_resolver.config import RefreshSettings
-from dns2bgp_resolver.domain import Domain, DomainName, ip_to_prefix24
+from dns2bgp_resolver.domain import Domain, DomainName, ip_to_prefix24, is_announcable_ipv4
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +111,16 @@ class ResolvePipeline:
                 error=str(exc),
             )
 
+        kept = [a for a in resolved if is_announcable_ipv4(a.ip.value)]
+        dropped = len(resolved) - len(kept)
+        if dropped:
+            logger.info(
+                "dropped %d non-announcable address(es) for %s",
+                dropped,
+                domain.name,
+            )
+        resolved = kept
+
         min_ttl = min((a.ttl_seconds for a in resolved), default=self._refresh.max_interval)
         next_at = now + self._next_resolve_delay(min_ttl)
         updated = await self._repository.replace_addresses(
@@ -180,7 +190,7 @@ class ResolvePipeline:
 
     async def _write_export(self) -> ExportSummary:
         ips = await self._repository.all_active_ips()
-        prefixes = sorted({ip_to_prefix24(ip) for ip in ips})
+        prefixes = sorted({ip_to_prefix24(ip) for ip in ips if is_announcable_ipv4(ip)})
         await self._exporter.export(prefixes)
         return ExportSummary(prefix_count=len(prefixes), path=self._export_path)
 

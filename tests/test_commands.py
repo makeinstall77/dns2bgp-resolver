@@ -110,7 +110,8 @@ async def test_list_and_remove(bus, bird_path: Path):
     await bus.execute(AddDomainCommand(name="example.com"))
     listed = await bus.execute(ListDomainsCommand())
     assert listed.ok
-    assert len(listed.data or []) == 1
+    assert listed.data is not None
+    assert len(listed.data.items) == 1
 
     removed = await bus.execute(RemoveDomainCommand(name="example.com"))
     assert removed.ok
@@ -118,7 +119,8 @@ async def test_list_and_remove(bus, bird_path: Path):
     assert "1.2.3.4" not in text
 
     listed2 = await bus.execute(ListDomainsCommand())
-    assert listed2.data == []
+    assert listed2.data is not None
+    assert listed2.data.items == []
 
 
 @pytest.mark.asyncio
@@ -342,3 +344,58 @@ async def test_bird_exporter_ip_nexthop(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_domain_name_normalization():
     assert str(DomainName("Example.COM.")) == "example.com"
+
+
+def test_is_announcable_ipv4():
+    from dns2bgp_resolver.domain import is_announcable_ipv4
+
+    assert is_announcable_ipv4("1.2.3.4")
+    assert is_announcable_ipv4("8.8.8.8")
+    assert not is_announcable_ipv4("127.0.0.1")
+    assert not is_announcable_ipv4("10.0.0.1")
+    assert not is_announcable_ipv4("192.168.1.1")
+    assert not is_announcable_ipv4("172.16.0.1")
+    assert not is_announcable_ipv4("224.0.0.1")
+    assert not is_announcable_ipv4("0.0.0.0")
+    assert not is_announcable_ipv4("169.254.1.1")
+
+
+@pytest.mark.asyncio
+async def test_resolve_filters_non_announcable_ips(repo, bird_path: Path):
+    dns = FakeDns(
+        {
+            "bad.example": [
+                ("1.2.3.4", 120),
+                ("127.0.0.1", 120),
+                ("10.0.0.1", 120),
+                ("224.0.0.1", 120),
+            ]
+        }
+    )
+    exporter = StaticFileBirdExporter(
+        BirdSettings(include_path=str(bird_path), nexthop="wg0", birdc_enable=False)
+    )
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    pipe = ResolvePipeline(
+        repository=repo,
+        resolver=dns,
+        exporter=exporter,
+        clock=clock,
+        refresh=RefreshSettings(max_interval=86400, min_interval=60),
+        export_path=str(bird_path),
+        export_min_interval=0,
+    )
+    from dns2bgp_resolver.domain import Domain
+
+    await repo.add(Domain.create("bad.example"))
+    summary = await pipe.resolve_one(DomainName("bad.example"))
+    assert summary.addresses == ["1.2.3.4"]
+    assert summary.changed
+    domain = await repo.get(DomainName("bad.example"))
+    assert domain is not None
+    assert [str(a.ip) for a in domain.addresses] == ["1.2.3.4"]
+    text = bird_path.read_text(encoding="utf-8")
+    assert "1.2.3.0/24" in text
+    assert "127.0.0.0/24" not in text
+    assert "10.0.0.0/24" not in text
+    assert "224.0.0.0/24" not in text

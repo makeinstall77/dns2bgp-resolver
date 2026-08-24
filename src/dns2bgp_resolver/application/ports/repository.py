@@ -86,11 +86,17 @@ class DomainRepository(ABC):
         ...
 
     @abstractmethod
+    async def get_by_id(self, domain_id: int) -> Domain | None:
+        ...
+
+    @abstractmethod
     async def list_all(self) -> list[Domain]:
         ...
 
     @abstractmethod
-    async def list_manual(self) -> list[Domain]:
+    async def list_manual(
+        self, *, offset: int = 0, limit: int | None = None
+    ) -> tuple[list[Domain], int]:
         ...
 
     @abstractmethod

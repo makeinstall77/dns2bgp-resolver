@@ -167,7 +167,7 @@ async def test_sync_skips_manual_conflict(repo):
     assert result.added == 1
     assert result.skipped_manual == 1
 
-    manual = await repo.list_manual()
+    manual, _total = await repo.list_manual()
     assert len(manual) == 1
     assert str(manual[0].name) == "shared.com"
 
@@ -177,7 +177,7 @@ async def test_sync_does_not_remove_manual(repo):
     await repo.add(Domain.create("manual.com", source="manual"))
     list_id = await _add_url_list(repo)
     await repo.sync_list_domains(list_id, {"auto.com"})
-    manual = await repo.list_manual()
+    manual, _total = await repo.list_manual()
     assert len(manual) == 1
     assert str(manual[0].name) == "manual.com"
 
@@ -187,8 +187,24 @@ async def test_list_manual_excludes_auto(repo):
     await repo.add(Domain.create("manual.com", source="manual"))
     list_id = await _add_url_list(repo)
     await repo.sync_list_domains(list_id, {"auto.com"})
-    manual = await repo.list_manual()
+    manual, total = await repo.list_manual()
+    assert total == 1
     assert [str(d.name) for d in manual] == ["manual.com"]
+
+
+@pytest.mark.asyncio
+async def test_list_manual_pagination(repo):
+    for i in range(5):
+        await repo.add(Domain.create(f"m{i}.example.com", source="manual"))
+    page1, total = await repo.list_manual(offset=0, limit=2)
+    assert total == 5
+    assert len(page1) == 2
+    page2, _ = await repo.list_manual(offset=2, limit=2)
+    assert len(page2) == 2
+    page3, _ = await repo.list_manual(offset=4, limit=2)
+    assert len(page3) == 1
+    names = {str(d.name) for d in page1 + page2 + page3}
+    assert len(names) == 5
 
 
 @pytest.mark.asyncio
@@ -460,8 +476,24 @@ async def test_list_domains_handler_manual_only(repo):
     handler = ListDomainsHandler(repo)
     result = await handler.handle(ListDomainsCommand())
     assert result.ok
-    assert len(result.data or []) == 1
-    assert result.data[0].name == "manual.com"
+    assert result.data is not None
+    assert len(result.data.items) == 1
+    assert result.data.items[0].name == "manual.com"
+    assert result.data.items[0].id is not None
+
+
+@pytest.mark.asyncio
+async def test_list_domains_command_pagination(repo):
+    for i in range(5):
+        await repo.add(Domain.create(f"p{i}.example.com", source="manual"))
+    handler = ListDomainsHandler(repo)
+    result = await handler.handle(ListDomainsCommand(page=2, page_size=2))
+    assert result.ok
+    assert result.data is not None
+    assert result.data.total == 5
+    assert result.data.page == 2
+    assert result.data.pages == 3
+    assert len(result.data.items) == 2
 
 
 @pytest.mark.asyncio
