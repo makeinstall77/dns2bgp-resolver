@@ -44,6 +44,7 @@ async def run_services(
                 task.cancel()
         await container.scheduler.stop()
         await container.auto_sync_scheduler.stop()
+        await container.pipeline.flush_pending_export()
 
     def _on_signal(signum: int, _frame=None) -> None:
         loop.call_soon_threadsafe(lambda: asyncio.create_task(_stop_services(f"signal:{signum}")))
