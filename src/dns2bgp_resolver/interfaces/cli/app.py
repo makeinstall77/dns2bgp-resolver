@@ -116,7 +116,7 @@ def list_domains(ctx: typer.Context) -> None:
         if not result.ok:
             typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
             raise typer.Exit(1)
-        domains = result.data or []
+        domains = result.data.items if result.data else []
         if not domains:
             typer.echo("(no domains)")
             return
