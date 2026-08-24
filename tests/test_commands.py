@@ -204,6 +204,124 @@ async def test_next_resolve_uses_min_ttl_capped(pipeline, repo):
 
 
 @pytest.mark.asyncio
+async def test_replace_addresses_upsert_keeps_stable_ips(repo):
+    from dns2bgp_resolver.domain import Domain
+    from dns2bgp_resolver.infrastructure.db.models import AddressRow
+    from sqlalchemy import select
+
+    await repo.add(Domain.create("stable.example"))
+    domain = await repo.get(DomainName("stable.example"))
+    assert domain is not None and domain.id is not None
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    await repo.replace_addresses(
+        domain.id,
+        [ResolvedAddress(ip=IpAddress("1.1.1.1"), ttl_seconds=60)],
+        resolved_at=now,
+        next_resolve_at=now,
+    )
+    async with repo._session_factory() as session:
+        rows = (
+            await session.execute(
+                select(AddressRow).where(AddressRow.domain_id == domain.id)
+            )
+        ).scalars().all()
+        assert len(rows) == 1
+        first_id = rows[0].id
+        first_seen = rows[0].first_seen
+
+    later = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    await repo.replace_addresses(
+        domain.id,
+        [ResolvedAddress(ip=IpAddress("1.1.1.1"), ttl_seconds=120)],
+        resolved_at=later,
+        next_resolve_at=later,
+    )
+    async with repo._session_factory() as session:
+        rows = (
+            await session.execute(
+                select(AddressRow).where(AddressRow.domain_id == domain.id)
+            )
+        ).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].id == first_id
+        assert rows[0].first_seen == first_seen
+        assert rows[0].ttl_seconds == 120
+        assert rows[0].last_seen.replace(tzinfo=timezone.utc) == later
+
+
+@pytest.mark.asyncio
+async def test_replace_addresses_upsert_swaps_changed_ip(repo):
+    from dns2bgp_resolver.domain import Domain
+
+    await repo.add(Domain.create("swap.example"))
+    domain = await repo.get(DomainName("swap.example"))
+    assert domain is not None and domain.id is not None
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    await repo.replace_addresses(
+        domain.id,
+        [ResolvedAddress(ip=IpAddress("1.1.1.1"), ttl_seconds=60)],
+        resolved_at=now,
+        next_resolve_at=now,
+    )
+    await repo.replace_addresses(
+        domain.id,
+        [ResolvedAddress(ip=IpAddress("9.9.9.9"), ttl_seconds=60)],
+        resolved_at=now,
+        next_resolve_at=now,
+    )
+    updated = await repo.get(DomainName("swap.example"))
+    assert updated is not None
+    assert {str(a.ip) for a in updated.addresses} == {"9.9.9.9"}
+
+
+@pytest.mark.asyncio
+async def test_resolve_due_batch_size_and_concurrency(repo, bird_path: Path):
+    from dns2bgp_resolver.domain import Domain
+
+    class SlowDns(DnsResolver):
+        def __init__(self) -> None:
+            self.active = 0
+            self.max_active = 0
+
+        async def resolve_a(self, name: DomainName) -> list[ResolvedAddress]:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            await asyncio.sleep(0.05)
+            self.active -= 1
+            return [ResolvedAddress(ip=IpAddress("1.2.3.4"), ttl_seconds=60)]
+
+    for i in range(5):
+        await repo.add(Domain.create(f"d{i}.example"))
+
+    dns = SlowDns()
+    exporter = StaticFileBirdExporter(
+        BirdSettings(include_path=str(bird_path), nexthop="wg0", birdc_enable=False)
+    )
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    pipe = ResolvePipeline(
+        repository=repo,
+        resolver=dns,
+        exporter=exporter,
+        clock=clock,
+        refresh=RefreshSettings(
+            max_interval=86400,
+            min_interval=60,
+            resolve_concurrency=3,
+            resolve_batch_size=2,
+        ),
+        export_path=str(bird_path),
+        export_min_interval=0,
+    )
+    first = await pipe.resolve_due()
+    assert len(first) == 2
+    assert dns.max_active <= 3
+    second = await pipe.resolve_due()
+    assert len(second) == 2
+    third = await pipe.resolve_due()
+    assert len(third) == 1
+
+
+@pytest.mark.asyncio
 async def test_invalid_domain(bus):
     result = await bus.execute(AddDomainCommand(name="not a domain"))
     assert not result.ok

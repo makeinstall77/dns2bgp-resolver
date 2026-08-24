@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -16,6 +17,8 @@ from dns2bgp_resolver.application.ports.repository import (
     DomainListCreate,
     DomainListUpdate,
     DomainRepository,
+    SyncPendingConfirmation,
+    SyncPreview,
 )
 from dns2bgp_resolver.domain import Domain, DomainList, DomainName, IpAddress, ResolvedAddress
 from dns2bgp_resolver.infrastructure.db.models import (
@@ -25,6 +28,7 @@ from dns2bgp_resolver.infrastructure.db.models import (
     Base,
     DomainListRow,
     DomainRow,
+    SyncPendingConfirmationRow,
 )
 
 logger = logging.getLogger(__name__)
@@ -69,6 +73,21 @@ def _row_to_domain_list(row: DomainListRow) -> DomainList:
         sync_interval=row.sync_interval,
         last_sync_at=_ensure_aware(row.last_sync_at),
         created_at=_ensure_aware(row.created_at),
+    )
+
+
+def _row_to_pending(row: SyncPendingConfirmationRow) -> SyncPendingConfirmation:
+    names = frozenset(json.loads(row.target_names))
+    return SyncPendingConfirmation(
+        token=row.token,
+        list_id=row.list_id,
+        list_name=row.list_name,
+        target_names=names,
+        would_add=row.would_add,
+        would_remove=row.would_remove,
+        current_count=row.current_count,
+        created_at=_ensure_aware(row.created_at) or row.created_at,
+        expires_at=_ensure_aware(row.expires_at) or row.expires_at,
     )
 
 
@@ -325,6 +344,108 @@ class SqlAlchemyDomainRepository(DomainRepository):
                 skipped_manual=skipped_manual,
             )
 
+    async def preview_list_sync(self, list_id: int, names: set[str]) -> SyncPreview:
+        async with self._session_factory() as session:
+            manual_result = await session.execute(
+                select(DomainRow.name).where(DomainRow.source == "manual")
+            )
+            manual_names = {row[0] for row in manual_result.fetchall()}
+
+            current_result = await session.execute(
+                select(DomainRow.name).where(
+                    DomainRow.source == "auto", DomainRow.list_id == list_id
+                )
+            )
+            current = {row[0] for row in current_result.fetchall()}
+
+        skipped_manual = len(names & manual_names)
+        target = names - manual_names
+        would_add = len(target - current)
+        would_remove = len(current - target)
+        return SyncPreview(
+            list_id=list_id,
+            current_count=len(current),
+            target_count=len(target),
+            would_add=would_add,
+            would_remove=would_remove,
+            skipped_manual=skipped_manual,
+            target_names=frozenset(target),
+        )
+
+    async def save_sync_pending(
+        self,
+        *,
+        token: str,
+        list_id: int,
+        list_name: str,
+        target_names: set[str],
+        would_add: int,
+        would_remove: int,
+        current_count: int,
+        created_at: datetime,
+        expires_at: datetime,
+    ) -> SyncPendingConfirmation:
+        payload = json.dumps(sorted(target_names))
+        async with self._session_factory() as session:
+            existing = await session.execute(
+                select(SyncPendingConfirmationRow).where(
+                    SyncPendingConfirmationRow.list_id == list_id
+                )
+            )
+            old = existing.scalar_one_or_none()
+            if old is not None:
+                await session.delete(old)
+                await session.flush()
+            row = SyncPendingConfirmationRow(
+                token=token,
+                list_id=list_id,
+                list_name=list_name,
+                target_names=payload,
+                would_add=would_add,
+                would_remove=would_remove,
+                current_count=current_count,
+                created_at=created_at,
+                expires_at=expires_at,
+            )
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return _row_to_pending(row)
+
+    async def get_sync_pending(self, token: str) -> SyncPendingConfirmation | None:
+        async with self._session_factory() as session:
+            row = await session.get(SyncPendingConfirmationRow, token)
+            return _row_to_pending(row) if row else None
+
+    async def get_sync_pending_by_list(self, list_id: int) -> SyncPendingConfirmation | None:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(SyncPendingConfirmationRow).where(
+                    SyncPendingConfirmationRow.list_id == list_id
+                )
+            )
+            row = result.scalar_one_or_none()
+            return _row_to_pending(row) if row else None
+
+    async def delete_sync_pending(self, token: str) -> bool:
+        async with self._session_factory() as session:
+            row = await session.get(SyncPendingConfirmationRow, token)
+            if row is None:
+                return False
+            await session.delete(row)
+            await session.commit()
+            return True
+
+    async def cleanup_expired_sync_pending(self, now: datetime) -> int:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                delete(SyncPendingConfirmationRow).where(
+                    SyncPendingConfirmationRow.expires_at <= now
+                )
+            )
+            await session.commit()
+            return int(result.rowcount or 0)
+
     async def clear_list_domains(self, list_id: int) -> int:
         async with self._session_factory() as session:
             result = await session.execute(
@@ -530,19 +651,26 @@ class SqlAlchemyDomainRepository(DomainRepository):
             if row is None:
                 raise ValueError(f"domain id not found: {domain_id}")
 
-            row.addresses.clear()
-            await session.flush()
-
-            for addr in addresses:
-                row.addresses.append(
-                    AddressRow(
-                        ip=str(addr.ip),
-                        family=addr.ip.family,
-                        ttl_seconds=addr.ttl_seconds,
-                        first_seen=resolved_at,
-                        last_seen=resolved_at,
+            by_ip = {a.ip: a for a in row.addresses}
+            new_by_ip = {str(a.ip): a for a in addresses}
+            for ip, addr_row in list(by_ip.items()):
+                if ip not in new_by_ip:
+                    row.addresses.remove(addr_row)
+            for ip, addr in new_by_ip.items():
+                existing = by_ip.get(ip)
+                if existing is not None:
+                    existing.ttl_seconds = addr.ttl_seconds
+                    existing.last_seen = resolved_at
+                else:
+                    row.addresses.append(
+                        AddressRow(
+                            ip=ip,
+                            family=addr.ip.family,
+                            ttl_seconds=addr.ttl_seconds,
+                            first_seen=resolved_at,
+                            last_seen=resolved_at,
+                        )
                     )
-                )
             row.last_resolved_at = resolved_at
             row.next_resolve_at = next_resolve_at
             row.last_error = error

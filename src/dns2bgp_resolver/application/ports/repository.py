@@ -19,6 +19,30 @@ class AutoSyncResult:
 
 
 @dataclass(frozen=True, slots=True)
+class SyncPreview:
+    list_id: int
+    current_count: int
+    target_count: int
+    would_add: int
+    would_remove: int
+    skipped_manual: int
+    target_names: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class SyncPendingConfirmation:
+    token: str
+    list_id: int
+    list_name: str
+    target_names: frozenset[str]
+    would_add: int
+    would_remove: int
+    current_count: int
+    created_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class DomainListCreate:
     name: str
     type: str
@@ -82,6 +106,42 @@ class DomainRepository(ABC):
     @abstractmethod
     async def sync_list_domains(self, list_id: int, names: set[str]) -> AutoSyncResult:
         """Replace domains for one list; skip names that exist as manual."""
+
+    @abstractmethod
+    async def preview_list_sync(self, list_id: int, names: set[str]) -> SyncPreview:
+        """Dry-run of sync_list_domains without mutating."""
+
+    @abstractmethod
+    async def save_sync_pending(
+        self,
+        *,
+        token: str,
+        list_id: int,
+        list_name: str,
+        target_names: set[str],
+        would_add: int,
+        would_remove: int,
+        current_count: int,
+        created_at: datetime,
+        expires_at: datetime,
+    ) -> SyncPendingConfirmation:
+        """Upsert pending confirmation for list_id (one open pending per list)."""
+
+    @abstractmethod
+    async def get_sync_pending(self, token: str) -> SyncPendingConfirmation | None:
+        ...
+
+    @abstractmethod
+    async def get_sync_pending_by_list(self, list_id: int) -> SyncPendingConfirmation | None:
+        ...
+
+    @abstractmethod
+    async def delete_sync_pending(self, token: str) -> bool:
+        ...
+
+    @abstractmethod
+    async def cleanup_expired_sync_pending(self, now: datetime) -> int:
+        """Delete expired pending rows. Return count removed."""
 
     @abstractmethod
     async def clear_list_domains(self, list_id: int) -> int:

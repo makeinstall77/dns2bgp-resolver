@@ -20,6 +20,8 @@ class DnsSettings(BaseModel):
 class RefreshSettings(BaseModel):
     max_interval: int = 86400
     min_interval: int = 60
+    resolve_concurrency: int = 8
+    resolve_batch_size: int = 100
 
 
 class BirdSettings(BaseModel):
@@ -51,6 +53,8 @@ class AutoListSettings(BaseModel):
     sync_interval: int = 86400
     sync_on_startup: bool = True
     exclude_keywords: list[str] = Field(default_factory=list)
+    max_removal_ratio: float = 0.5
+    confirm_ttl_seconds: int = 3600
 
 
 class Settings(BaseSettings):
