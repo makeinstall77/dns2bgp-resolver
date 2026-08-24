@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Awaitable, Callable
 
-from aiogram import BaseMiddleware, Bot, Dispatcher, F
+from aiogram import BaseMiddleware, Bot, Dispatcher, F, Router
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Message, TelegramObject
 
@@ -54,11 +54,17 @@ async def run_telegram_bot(container: AppContainer) -> None:
     dp.include_router(lists.router)
     dp.include_router(settings.router)
 
-    @dp.message(F.text & ~F.text.in_(_MENU_BUTTONS))
+    # Must be a nested router included last. Handlers on Dispatcher run before
+    # child routers, so a catch-all here would steal FSM text input.
+    fallback_router = Router()
+
+    @fallback_router.message(F.text & ~F.text.in_(_MENU_BUTTONS))
     async def fallback(message: Message, container: AppContainer) -> None:
         if not allowed(container, message.from_user.id if message.from_user else None):
             return
         await message.answer("Выберите действие в меню.", reply_markup=main_menu_keyboard())
+
+    dp.include_router(fallback_router)
 
     logger.info("telegram polling started")
     await dp.start_polling(bot)
