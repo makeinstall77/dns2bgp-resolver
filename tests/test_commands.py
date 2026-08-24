@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -75,6 +76,7 @@ async def pipeline(repo, bird_path: Path):
         clock=clock,
         refresh=RefreshSettings(max_interval=86400, min_interval=60),
         export_path=str(bird_path),
+        export_min_interval=0,
     )
     return pipe, dns, exporter
 
@@ -137,6 +139,47 @@ async def test_resolve_change_triggers_export(pipeline, repo, bird_path: Path):
     third = await pipe.resolve_one(DomainName("example.com"))
     assert third.changed
     assert "9.9.9.0/24" in bird_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_resolve_export_coalesced_by_interval(repo, bird_path: Path):
+    dns = FakeDns(
+        {
+            "a.example": [("1.1.1.1", 120)],
+            "b.example": [("2.2.2.2", 120)],
+        }
+    )
+    exporter = StaticFileBirdExporter(
+        BirdSettings(include_path=str(bird_path), nexthop="wg0", birdc_enable=False)
+    )
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    pipe = ResolvePipeline(
+        repository=repo,
+        resolver=dns,
+        exporter=exporter,
+        clock=clock,
+        refresh=RefreshSettings(max_interval=86400, min_interval=60),
+        export_path=str(bird_path),
+        export_min_interval=0.2,
+    )
+    from dns2bgp_resolver.domain import Domain
+
+    await repo.add(Domain.create("a.example"))
+    await repo.add(Domain.create("b.example"))
+
+    first = await pipe.resolve_one(DomainName("a.example"))
+    assert first.exported
+    assert "1.1.1.0/24" in bird_path.read_text(encoding="utf-8")
+    assert "2.2.2.0/24" not in bird_path.read_text(encoding="utf-8")
+
+    second = await pipe.resolve_one(DomainName("b.example"))
+    assert second.changed
+    assert not second.exported
+    assert "2.2.2.0/24" not in bird_path.read_text(encoding="utf-8")
+
+    assert pipe._flush_task is not None
+    await asyncio.wait_for(pipe._flush_task, timeout=1.0)
+    assert "2.2.2.0/24" in bird_path.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio
