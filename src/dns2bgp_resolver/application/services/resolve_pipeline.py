@@ -41,6 +41,8 @@ class ResolvePipeline:
         self._last_export_mono: float | None = None
         self._export_lock = asyncio.Lock()
         self._flush_task: asyncio.Task[None] | None = None
+        self._resolve_concurrency = max(1, int(refresh.resolve_concurrency))
+        self._resolve_batch_size = max(1, int(refresh.resolve_batch_size))
 
     def _next_resolve_delay(self, ttl_seconds: int | None) -> timedelta:
         if ttl_seconds is None or ttl_seconds <= 0:
@@ -63,23 +65,30 @@ class ResolvePipeline:
         return await self._resolve_domain(domain)
 
     async def resolve_all(self) -> list[ResolveSummary]:
-        domains = await self._repository.list_all()
-        results: list[ResolveSummary] = []
-        for domain in domains:
-            if not domain.enabled or domain.id is None:
-                continue
-            results.append(await self._resolve_domain(domain))
-        return results
+        domains = [
+            d for d in await self._repository.list_all() if d.enabled and d.id is not None
+        ]
+        return await self._resolve_many(domains)
 
     async def resolve_due(self) -> list[ResolveSummary]:
         now = self._clock.now()
         due = await self._repository.list_due(now)
-        results: list[ResolveSummary] = []
-        for domain in due:
-            if domain.id is None:
-                continue
-            results.append(await self._resolve_domain(domain))
-        return results
+        due = [d for d in due if d.id is not None][: self._resolve_batch_size]
+        return await self._resolve_many(due)
+
+    async def _resolve_many(self, domains: list[Domain]) -> list[ResolveSummary]:
+        if not domains:
+            return []
+        if self._resolve_concurrency == 1 or len(domains) == 1:
+            return [await self._resolve_domain(d) for d in domains]
+
+        sem = asyncio.Semaphore(self._resolve_concurrency)
+
+        async def _one(domain: Domain) -> ResolveSummary:
+            async with sem:
+                return await self._resolve_domain(domain)
+
+        return list(await asyncio.gather(*(_one(d) for d in domains)))
 
     async def _resolve_domain(self, domain: Domain) -> ResolveSummary:
         assert domain.id is not None

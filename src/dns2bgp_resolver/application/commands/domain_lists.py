@@ -175,7 +175,21 @@ class SyncDomainListHandler:
                 skipped_manual=result.skipped_manual,
                 list_id=result.list_id,
                 list_name=result.list_name,
+                needs_confirmation=result.needs_confirmation,
+                pending_token=result.pending_token,
+                would_add=result.would_add,
+                would_remove=result.would_remove,
+                current_count=result.current_count,
             )
+            if result.needs_confirmation:
+                return CommandResult.success(
+                    view,
+                    message=(
+                        f"sync {result.list_name} blocked: "
+                        f"remove {result.would_remove}/{result.current_count}, "
+                        f"add {result.would_add} — confirm in Telegram"
+                    ),
+                )
             return CommandResult.success(
                 view,
                 message=f"sync {result.list_name}: +{result.added} -{result.removed}",

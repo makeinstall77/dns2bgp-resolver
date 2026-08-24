@@ -19,6 +19,7 @@ from dns2bgp_resolver.interfaces.telegram.keyboards import (
     BTN_SETTINGS,
     main_menu_keyboard,
 )
+from dns2bgp_resolver.interfaces.telegram.sync_alert import TelegramSyncAlertNotifier
 
 _MENU_BUTTONS = {BTN_DOMAINS, BTN_AUTO, BTN_LISTS, BTN_SETTINGS, BTN_RESOLVE, BTN_CANCEL}
 
@@ -45,6 +46,9 @@ async def run_telegram_bot(container: AppContainer) -> None:
         raise RuntimeError("telegram token is empty")
 
     bot = Bot(token=token)
+    notifier = container.sync_alert_notifier
+    if isinstance(notifier, TelegramSyncAlertNotifier):
+        notifier.bind_bot(bot)
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.middleware(ContainerMiddleware(container))
 

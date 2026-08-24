@@ -56,6 +56,9 @@ from dns2bgp_resolver.infrastructure.db.sqlite_repository import SqlAlchemyDomai
 from dns2bgp_resolver.infrastructure.dns.dnspython_resolver import DnspythonResolver
 from dns2bgp_resolver.infrastructure.scheduling.auto_list_scheduler import AutoListSyncScheduler
 from dns2bgp_resolver.infrastructure.scheduling.refresh_scheduler import RefreshScheduler
+from dns2bgp_resolver.interfaces.telegram.sync_alert import TelegramSyncAlertNotifier
+from dns2bgp_resolver.application.ports.sync_alert import SyncAlertNotifier
+from dns2bgp_resolver.application.services.auto_list_sync import NullSyncAlertNotifier
 
 
 @dataclass
@@ -67,6 +70,7 @@ class AppContainer:
     scheduler: RefreshScheduler
     auto_sync_service: DomainListSyncService
     auto_sync_scheduler: AutoListSyncScheduler
+    sync_alert_notifier: SyncAlertNotifier
 
     async def startup(self) -> None:
         url = self.settings.database.url
@@ -80,6 +84,7 @@ class AppContainer:
         bird_dir.mkdir(parents=True, exist_ok=True)
         bird_dir.chmod(0o755)
         await self.repository.initialize()
+        await self.auto_sync_service.cleanup_expired_pending()
         await self._seed_exclude_keywords()
         await self._seed_domain_lists()
 
@@ -104,6 +109,9 @@ class AppContainer:
         await self.auto_sync_scheduler.stop()
         await self.scheduler.stop()
         await self.pipeline.flush_pending_export()
+        closer = getattr(self.sync_alert_notifier, "close", None)
+        if closer is not None:
+            await closer()
         await self.repository.close()
 
 
@@ -161,6 +169,11 @@ def build_container(settings: Settings | None = None) -> AppContainer:
         settings=settings.auto_list,
         clock=clock,
     )
+    if settings.telegram.token and settings.telegram.allowed_user_ids:
+        sync_alert_notifier: SyncAlertNotifier = TelegramSyncAlertNotifier(settings.telegram)
+    else:
+        sync_alert_notifier = NullSyncAlertNotifier()
+    auto_sync_service.set_notifier(sync_alert_notifier)
     bus = CommandBus()
     bus.register(AddDomainCommand, AddDomainAndResolveHandler(repository, pipeline))
     bus.register(RemoveDomainCommand, RemoveDomainAndExportHandler(repository, pipeline))
@@ -195,4 +208,5 @@ def build_container(settings: Settings | None = None) -> AppContainer:
         scheduler=scheduler,
         auto_sync_service=auto_sync_service,
         auto_sync_scheduler=auto_sync_scheduler,
+        sync_alert_notifier=sync_alert_notifier,
     )

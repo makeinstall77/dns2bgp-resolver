@@ -96,3 +96,24 @@ class AutoExcludeKeywordRow(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     keyword: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+
+
+class SyncPendingConfirmationRow(Base):
+    __tablename__ = "sync_pending_confirmations"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    list_id: Mapped[int] = mapped_column(
+        ForeignKey("domain_lists.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    list_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    target_names: Mapped[str] = mapped_column(Text, nullable=False)
+    would_add: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    would_remove: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    current_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
