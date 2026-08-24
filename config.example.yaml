@@ -8,6 +8,8 @@ dns:
 refresh:
   max_interval: 86400
   min_interval: 60
+  resolve_concurrency: 8
+  resolve_batch_size: 100
 
 bird:
   include_path: "./data/dns2bgp.routes"
@@ -34,3 +36,5 @@ auto_list:
   sync_interval: 86400
   sync_on_startup: true
   exclude_keywords: []
+  max_removal_ratio: 0.5
+  confirm_ttl_seconds: 3600
