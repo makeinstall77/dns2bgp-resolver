@@ -143,6 +143,17 @@ def confirm_remove_host_menu(domain_id: int, page: int) -> InlineKeyboardMarkup:
     )
 
 
+def confirm_import_menu(token: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Импортировать", callback_data=f"mi:ok:{token}"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data=f"mi:no:{token}"),
+            ]
+        ]
+    )
+
+
 def lists_menu(list_buttons: list[InlineKeyboardButton]) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for i in range(0, len(list_buttons), 2):
