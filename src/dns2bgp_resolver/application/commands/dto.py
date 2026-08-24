@@ -50,6 +50,11 @@ class AutoSyncView:
     skipped_manual: int
     list_id: int | None = None
     list_name: str | None = None
+    needs_confirmation: bool = False
+    pending_token: str | None = None
+    would_add: int = 0
+    would_remove: int = 0
+    current_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)

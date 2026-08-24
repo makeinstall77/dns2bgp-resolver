@@ -29,6 +29,8 @@ from dns2bgp_resolver.application.services.auto_list_sync import (
     apply_keyword_filter,
     parse_domain_lines,
 )
+from dns2bgp_resolver.application.ports.sync_alert import SyncAlertNotifier
+from dns2bgp_resolver.application.ports.repository import SyncPendingConfirmation
 from dns2bgp_resolver.application.services.resolve_pipeline import ResolvePipeline
 from dns2bgp_resolver.application.ports.repository import DomainListCreate
 from dns2bgp_resolver.config import AutoListSettings, BirdSettings, RefreshSettings
@@ -54,6 +56,13 @@ class FakeDownloader:
         self.calls.append(url)
         return self.text
 
+
+class RecordingNotifier(SyncAlertNotifier):
+    def __init__(self) -> None:
+        self.calls: list[SyncPendingConfirmation] = []
+
+    async def notify_dangerous_sync(self, pending: SyncPendingConfirmation) -> None:
+        self.calls.append(pending)
 
 @pytest.fixture
 async def repo(tmp_path: Path):
@@ -235,7 +244,7 @@ async def test_auto_list_sync_service(repo, pipeline, bird_path: Path, clock):
 
 @pytest.mark.asyncio
 async def test_auto_list_sync_replace(repo, pipeline, clock):
-    await _add_url_list(repo)
+    list_id = await _add_url_list(repo)
     downloader = FakeDownloader("first.com\n")
     service = AutoListSyncService(
         repository=repo,
@@ -244,14 +253,193 @@ async def test_auto_list_sync_replace(repo, pipeline, clock):
         clock=clock,
         downloader=downloader,
     )
-    await service.sync()
+    await service.sync_list(list_id)
     downloader.text = "second.com\n"
-    result = await service.sync()
-    assert result.added == 1
-    assert result.removed == 1
+    blocked = await service.sync_list(list_id)
+    assert blocked is not None
+    assert blocked.needs_confirmation
+    confirmed = await service.confirm_pending(blocked.pending_token or "")
+    assert confirmed is not None
+    assert confirmed.added == 1
+    assert confirmed.removed == 1
     items, total = await repo.search_auto("")
     assert total == 1
     assert str(items[0].name) == "second.com"
+
+
+@pytest.mark.asyncio
+async def test_sync_blocks_empty_target(repo, pipeline, clock):
+    list_id = await _add_url_list(repo)
+    downloader = FakeDownloader("a.com\nb.com\n")
+    service = AutoListSyncService(
+        repository=repo,
+        pipeline=pipeline,
+        settings=AutoListSettings(enabled=True, max_removal_ratio=0.5),
+        clock=clock,
+        downloader=downloader,
+    )
+    await service.sync_list(list_id)
+    downloader.text = ""
+    result = await service.sync_list(list_id)
+    assert result is not None
+    assert result.needs_confirmation
+    assert result.would_remove == 2
+    assert result.pending_token
+    items, total = await repo.search_auto("")
+    assert total == 2
+    pending = await repo.get_sync_pending(result.pending_token)
+    assert pending is not None
+
+
+@pytest.mark.asyncio
+async def test_sync_blocks_high_removal_ratio(repo, pipeline, clock):
+    list_id = await _add_url_list(repo)
+    downloader = FakeDownloader("a.com\nb.com\nc.com\nd.com\n")
+    service = AutoListSyncService(
+        repository=repo,
+        pipeline=pipeline,
+        settings=AutoListSettings(enabled=True, max_removal_ratio=0.5),
+        clock=clock,
+        downloader=downloader,
+    )
+    await service.sync_list(list_id)
+    downloader.text = "a.com\n"
+    result = await service.sync_list(list_id)
+    assert result is not None
+    assert result.needs_confirmation
+    assert result.would_remove == 3
+    items, total = await repo.search_auto("")
+    assert total == 4
+
+
+@pytest.mark.asyncio
+async def test_sync_force_bypasses_guards(repo, pipeline, clock):
+    list_id = await _add_url_list(repo)
+    downloader = FakeDownloader("a.com\nb.com\n")
+    service = AutoListSyncService(
+        repository=repo,
+        pipeline=pipeline,
+        settings=AutoListSettings(enabled=True, max_removal_ratio=0.5),
+        clock=clock,
+        downloader=downloader,
+    )
+    await service.sync_list(list_id)
+    downloader.text = ""
+    result = await service.sync_list(list_id, force=True)
+    assert result is not None
+    assert not result.needs_confirmation
+    assert result.removed == 2
+    items, total = await repo.search_auto("")
+    assert total == 0
+
+
+@pytest.mark.asyncio
+async def test_confirm_pending_applies_snapshot(repo, pipeline, clock):
+    list_id = await _add_url_list(repo)
+    downloader = FakeDownloader("a.com\nb.com\nc.com\n")
+    notifier = RecordingNotifier()
+    service = AutoListSyncService(
+        repository=repo,
+        pipeline=pipeline,
+        settings=AutoListSettings(enabled=True, max_removal_ratio=0.5),
+        clock=clock,
+        downloader=downloader,
+        notifier=notifier,
+    )
+    await service.sync_list(list_id)
+    downloader.text = "a.com\n"
+    blocked = await service.sync_list(list_id)
+    assert blocked is not None and blocked.needs_confirmation
+    assert len(notifier.calls) == 1
+    token = blocked.pending_token
+    assert token
+
+    # Simulate restart: new service/repo still sees pending
+    pending = await repo.get_sync_pending(token)
+    assert pending is not None
+    assert pending.target_names == frozenset({"a.com"})
+
+    confirmed = await service.confirm_pending(token)
+    assert confirmed is not None
+    assert confirmed.removed == 2
+    assert confirmed.added == 0
+    items, total = await repo.search_auto("")
+    assert total == 1
+    assert str(items[0].name) == "a.com"
+    assert await repo.get_sync_pending(token) is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_pending_leaves_list(repo, pipeline, clock):
+    list_id = await _add_url_list(repo)
+    downloader = FakeDownloader("a.com\nb.com\n")
+    service = AutoListSyncService(
+        repository=repo,
+        pipeline=pipeline,
+        settings=AutoListSettings(enabled=True),
+        clock=clock,
+        downloader=downloader,
+    )
+    await service.sync_list(list_id)
+    downloader.text = ""
+    blocked = await service.sync_list(list_id)
+    assert blocked is not None and blocked.pending_token
+    assert await service.cancel_pending(blocked.pending_token)
+    items, total = await repo.search_auto("")
+    assert total == 2
+    assert await repo.get_sync_pending(blocked.pending_token) is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_expired_pending(repo, pipeline, clock):
+    list_id = await _add_url_list(repo)
+    downloader = FakeDownloader("a.com\n")
+    service = AutoListSyncService(
+        repository=repo,
+        pipeline=pipeline,
+        settings=AutoListSettings(enabled=True, confirm_ttl_seconds=1),
+        clock=clock,
+        downloader=downloader,
+    )
+    await service.sync_list(list_id)
+    downloader.text = ""
+    blocked = await service.sync_list(list_id)
+    assert blocked is not None and blocked.pending_token
+    from datetime import timedelta
+
+    expired_clock = FixedClock(clock.now() + timedelta(seconds=10))
+    service2 = AutoListSyncService(
+        repository=repo,
+        pipeline=pipeline,
+        settings=AutoListSettings(enabled=True, confirm_ttl_seconds=1),
+        clock=expired_clock,
+        downloader=downloader,
+    )
+    removed = await service2.cleanup_expired_pending()
+    assert removed == 1
+    assert await repo.get_sync_pending(blocked.pending_token) is None
+
+
+@pytest.mark.asyncio
+async def test_dedup_pending_does_not_renotify(repo, pipeline, clock):
+    list_id = await _add_url_list(repo)
+    downloader = FakeDownloader("a.com\nb.com\n")
+    notifier = RecordingNotifier()
+    service = AutoListSyncService(
+        repository=repo,
+        pipeline=pipeline,
+        settings=AutoListSettings(enabled=True),
+        clock=clock,
+        downloader=downloader,
+        notifier=notifier,
+    )
+    await service.sync_list(list_id)
+    downloader.text = ""
+    first = await service.sync_list(list_id)
+    second = await service.sync_list(list_id)
+    assert first is not None and second is not None
+    assert first.pending_token == second.pending_token
+    assert len(notifier.calls) == 1
 
 
 @pytest.mark.asyncio

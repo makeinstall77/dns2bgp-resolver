@@ -97,6 +97,54 @@ async def cb_sync_one(callback: CallbackQuery, container: AppContainer) -> None:
     await callback.answer(result.message or "Synced.", show_alert=True)
 
 
+@router.callback_query(F.data.startswith("l:syncforce:"))
+async def cb_sync_force(callback: CallbackQuery, container: AppContainer) -> None:
+    parts = (callback.data or "").split(":")
+    if len(parts) != 4:
+        await callback.answer("Invalid.", show_alert=True)
+        return
+    list_id = int(parts[2])
+    token = parts[3]
+    pending = await container.repository.get_sync_pending(token)
+    if pending is None or pending.list_id != list_id:
+        await callback.answer("Expired or unknown.", show_alert=True)
+        if callback.message:
+            await callback.message.edit_text("Sync confirmation expired or already handled.")
+        return
+    result = await container.auto_sync_service.confirm_pending(token)
+    if result is None:
+        await callback.answer("Failed.", show_alert=True)
+        if callback.message:
+            await callback.message.edit_text("Sync confirmation expired or already handled.")
+        return
+    text = f"Confirmed sync {result.list_name}: +{result.added} -{result.removed}"
+    if callback.message:
+        await callback.message.edit_text(text)
+    await callback.answer("Applied.")
+
+
+@router.callback_query(F.data.startswith("l:synccancel:"))
+async def cb_sync_cancel(callback: CallbackQuery, container: AppContainer) -> None:
+    parts = (callback.data or "").split(":")
+    if len(parts) != 4:
+        await callback.answer("Invalid.", show_alert=True)
+        return
+    list_id = int(parts[2])
+    token = parts[3]
+    pending = await container.repository.get_sync_pending(token)
+    if pending is None or pending.list_id != list_id:
+        await callback.answer("Already cancelled.", show_alert=True)
+        if callback.message:
+            await callback.message.edit_text("Sync confirmation expired or already handled.")
+        return
+    await container.auto_sync_service.cancel_pending(token)
+    if callback.message:
+        await callback.message.edit_text(
+            f"Sync cancelled for {pending.list_name}. List left unchanged."
+        )
+    await callback.answer("Cancelled.")
+
+
 @router.callback_query(F.data.startswith("l:clr:"))
 async def cb_clear_prompt(callback: CallbackQuery) -> None:
     list_id = int((callback.data or "").split(":")[-1])
