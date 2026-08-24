@@ -57,6 +57,18 @@ def ip_to_prefix24(ip: str) -> str:
     return str(IPv4Network(f"{ip}/24", strict=False))
 
 
+def is_announcable_ipv4(ip: str) -> bool:
+    addr = IPv4Address(ip)
+    return not (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_multicast
+        or addr.is_link_local
+        or addr.is_reserved
+        or addr.is_unspecified
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedAddress:
     ip: IpAddress
