@@ -30,6 +30,8 @@ class BirdSettings(BaseModel):
     birdc_enable: bool = True
     birdc_bin: str = "birdc"
     birdc_socket: str = "/run/bird/bird.ctl"
+    # Coalesce resolve-triggered bird reloads (0 = export on every change).
+    export_min_interval: int = 60
 
 
 class WebSettings(BaseModel):

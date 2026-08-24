@@ -17,6 +17,7 @@ bird:
   birdc_enable: true
   birdc_bin: birdc
   birdc_socket: "/run/bird/bird.ctl"
+  export_min_interval: 60
 
 web:
   host: "127.0.0.1"

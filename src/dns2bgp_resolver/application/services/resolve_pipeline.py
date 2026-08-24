@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from datetime import timedelta
 
 from dns2bgp_resolver.application.commands.dto import ExportSummary, ResolveSummary
@@ -15,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class ResolvePipeline:
-    """Orchestrates resolve → persist → export-if-changed."""
+    """Orchestrates resolve → persist → coalesced export-if-changed."""
 
     def __init__(
         self,
@@ -26,6 +28,7 @@ class ResolvePipeline:
         refresh: RefreshSettings,
         *,
         export_path: str,
+        export_min_interval: float = 60.0,
     ) -> None:
         self._repository = repository
         self._resolver = resolver
@@ -33,6 +36,11 @@ class ResolvePipeline:
         self._clock = clock
         self._refresh = refresh
         self._export_path = export_path
+        self._export_min_interval = max(0.0, float(export_min_interval))
+        self._export_dirty = False
+        self._last_export_mono: float | None = None
+        self._export_lock = asyncio.Lock()
+        self._flush_task: asyncio.Task[None] | None = None
 
     def _next_resolve_delay(self, ttl_seconds: int | None) -> timedelta:
         if ttl_seconds is None or ttl_seconds <= 0:
@@ -107,8 +115,7 @@ class ResolvePipeline:
         changed = new_ips != old_ips
         exported = False
         if changed:
-            await self.export_routes()
-            exported = True
+            exported = await self._request_export()
 
         return ResolveSummary(
             domain=str(domain.name),
@@ -118,12 +125,76 @@ class ResolvePipeline:
             error=None,
         )
 
-    async def export_routes(self) -> ExportSummary:
+    async def _request_export(self) -> bool:
+        """Mark pool dirty; export now only if min interval elapsed."""
+        self._export_dirty = True
+        return await self._flush_export(force=False)
+
+    def _schedule_flush(self, delay: float) -> None:
+        if self._flush_task is not None and not self._flush_task.done():
+            return
+
+        async def _run() -> None:
+            try:
+                await asyncio.sleep(delay)
+                await self._flush_export(force=False)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                logger.exception("deferred bird export failed")
+
+        self._flush_task = asyncio.create_task(_run(), name="bird-export-flush")
+
+    async def _flush_export(self, *, force: bool) -> bool:
+        async with self._export_lock:
+            if not force and not self._export_dirty:
+                return False
+
+            now = time.monotonic()
+            if not force and self._last_export_mono is not None and self._export_min_interval > 0:
+                elapsed = now - self._last_export_mono
+                remaining = self._export_min_interval - elapsed
+                if remaining > 0:
+                    self._schedule_flush(remaining)
+                    logger.debug(
+                        "bird export deferred (%.1fs remaining, dirty=%s)",
+                        remaining,
+                        self._export_dirty,
+                    )
+                    return False
+
+            summary = await self._write_export()
+            self._export_dirty = False
+            self._last_export_mono = now
+            logger.info("bird export flushed (%d prefix(es))", summary.prefix_count)
+            return True
+
+    async def _write_export(self) -> ExportSummary:
         ips = await self._repository.all_active_ips()
         prefixes = sorted({ip_to_prefix24(ip) for ip in ips})
         await self._exporter.export(prefixes)
         return ExportSummary(prefix_count=len(prefixes), path=self._export_path)
 
+    async def export_routes(self) -> ExportSummary:
+        """Immediate export (CLI/API/startup). Resets coalescing timer."""
+        async with self._export_lock:
+            summary = await self._write_export()
+            self._export_dirty = False
+            self._last_export_mono = time.monotonic()
+            return summary
+
     async def export_after_mutation(self) -> ExportSummary:
         """Re-export pool after add/remove without resolving."""
         return await self.export_routes()
+
+    async def flush_pending_export(self) -> None:
+        """Flush deferred export if any (e.g. on shutdown)."""
+        if self._flush_task is not None and not self._flush_task.done():
+            self._flush_task.cancel()
+            try:
+                await self._flush_task
+            except asyncio.CancelledError:
+                pass
+            self._flush_task = None
+        if self._export_dirty:
+            await self._flush_export(force=True)
