@@ -101,6 +101,7 @@ async def pipeline(repo, bird_path: Path):
         clock=fixed_clock,
         refresh=RefreshSettings(max_interval=86400, min_interval=60),
         export_path=str(bird_path),
+        export_min_interval=0,
     )
     return pipe
 

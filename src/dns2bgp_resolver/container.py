@@ -103,6 +103,7 @@ class AppContainer:
     async def shutdown(self) -> None:
         await self.auto_sync_scheduler.stop()
         await self.scheduler.stop()
+        await self.pipeline.flush_pending_export()
         await self.repository.close()
 
 
@@ -152,6 +153,7 @@ def build_container(settings: Settings | None = None) -> AppContainer:
         clock=clock,
         refresh=settings.refresh,
         export_path=settings.bird.include_path,
+        export_min_interval=settings.bird.export_min_interval,
     )
     auto_sync_service = DomainListSyncService(
         repository=repository,
