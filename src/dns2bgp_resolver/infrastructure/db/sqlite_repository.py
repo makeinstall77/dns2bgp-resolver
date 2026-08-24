@@ -194,21 +194,33 @@ class SqlAlchemyDomainRepository(DomainRepository):
             row = result.scalar_one_or_none()
             return _row_to_domain(row) if row else None
 
+    async def get_by_id(self, domain_id: int) -> Domain | None:
+        async with self._session_factory() as session:
+            result = await session.execute(select(DomainRow).where(DomainRow.id == domain_id))
+            row = result.scalar_one_or_none()
+            return _row_to_domain(row) if row else None
+
     async def list_all(self) -> list[Domain]:
         async with self._session_factory() as session:
             result = await session.execute(select(DomainRow).order_by(DomainRow.name))
             rows = result.scalars().all()
             return [_row_to_domain(r) for r in rows]
 
-    async def list_manual(self) -> list[Domain]:
+    async def list_manual(
+        self, *, offset: int = 0, limit: int | None = None
+    ) -> tuple[list[Domain], int]:
         async with self._session_factory() as session:
-            result = await session.execute(
-                select(DomainRow)
-                .where(DomainRow.source == "manual")
-                .order_by(DomainRow.name)
+            base = select(DomainRow).where(DomainRow.source == "manual")
+            count_result = await session.execute(
+                select(func.count()).select_from(base.subquery())
             )
+            total = count_result.scalar_one()
+            query = base.order_by(DomainRow.name).offset(offset)
+            if limit is not None:
+                query = query.limit(limit)
+            result = await session.execute(query)
             rows = result.scalars().all()
-            return [_row_to_domain(r) for r in rows]
+            return [_row_to_domain(r) for r in rows], total
 
     async def search_auto(
         self, query: str, *, offset: int = 0, limit: int = 50

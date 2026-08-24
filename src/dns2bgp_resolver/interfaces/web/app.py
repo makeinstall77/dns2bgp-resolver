@@ -281,7 +281,7 @@ def create_app(container: AppContainer) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request, tab: str = "manual") -> HTMLResponse:
         result = await container.bus.execute(ListDomainsCommand())
-        domains = result.data or []
+        domains = result.data.items if result.data else []
         return templates.TemplateResponse(
             request,
             "index.html",
@@ -390,7 +390,7 @@ def create_app(container: AppContainer) -> FastAPI:
         result = await container.bus.execute(ListDomainsCommand())
         if not result.ok:
             raise HTTPException(status_code=500, detail=result.error)
-        return [d.__dict__ for d in (result.data or [])]
+        return [d.__dict__ for d in (result.data.items if result.data else [])]
 
     @app.post("/api/domains", status_code=201)
     async def api_add(body: DomainCreate, _: Auth):

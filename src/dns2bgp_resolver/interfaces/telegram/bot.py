@@ -9,7 +9,7 @@ from aiogram.types import Message, TelegramObject
 
 from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
-from dns2bgp_resolver.interfaces.telegram.handlers import auto, lists, manual, menu, settings
+from dns2bgp_resolver.interfaces.telegram.handlers import auto, import_file, lists, manual, menu, settings
 from dns2bgp_resolver.interfaces.telegram.keyboards import (
     BTN_AUTO,
     BTN_CANCEL,
@@ -57,6 +57,7 @@ async def run_telegram_bot(container: AppContainer) -> None:
     dp.include_router(auto.router)
     dp.include_router(lists.router)
     dp.include_router(settings.router)
+    dp.include_router(import_file.router)
 
     # Must be a nested router included last. Handlers on Dispatcher run before
     # child routers, so a catch-all here would steal FSM text input.
