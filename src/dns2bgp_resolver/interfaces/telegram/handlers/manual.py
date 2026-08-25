@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from dns2bgp_resolver.application.commands import (
     AddDomainCommand,
@@ -10,6 +10,7 @@ from dns2bgp_resolver.application.commands import (
     RemoveDomainCommand,
     ResolveNowCommand,
 )
+from dns2bgp_resolver.application.services.list_parse import format_domains_export
 from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.domain import format_domain_label
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
@@ -223,6 +224,27 @@ async def cb_remove_confirm(callback: CallbackQuery, container: AppContainer, ui
     if callback.message:
         await ui.edit(callback.message, text, reply_markup=markup)
     await callback.answer("Удалено.")
+
+
+@router.callback_query(F.data == "d:export")
+async def cb_export(callback: CallbackQuery, container: AppContainer) -> None:
+    if not allowed(container, callback.from_user.id if callback.from_user else None):
+        await callback.answer("Access denied.", show_alert=True)
+        return
+    result = await container.bus.execute(ListDomainsCommand())
+    if not result.ok or result.data is None:
+        await callback.answer(result.error or "Error", show_alert=True)
+        return
+    text = format_domains_export(d.label for d in result.data.items)
+    if not text:
+        await callback.answer("Список пуст.", show_alert=True)
+        return
+    if callback.message is None:
+        await callback.answer()
+        return
+    doc = BufferedInputFile(text.encode("utf-8"), filename="domains.txt")
+    await callback.message.answer_document(doc, caption=f"Доменов: {result.data.total}")
+    await callback.answer()
 
 
 @router.callback_query(F.data == "d:add")
