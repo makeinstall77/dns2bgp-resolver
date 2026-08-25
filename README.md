@@ -101,9 +101,17 @@ dnstap:
 In `unbound.conf`:
 
 ```
-dnstap-enable: yes
-dnstap-socket-path: "/var/lib/dns2bgp/dnstap.sock"
-dnstap-send-client-response: yes
+dnstap:
+  dnstap-enable: yes
+  dnstap-bidirectional: yes
+  dnstap-socket-path: "/var/lib/dns2bgp/dnstap.sock"
+  dnstap-log-client-response-messages: yes
+```
+
+If AppArmor confines unbound, allow the socket (e.g. in `/etc/apparmor.d/local/usr.sbin.unbound`):
+
+```
+/var/lib/dns2bgp/dnstap.sock rw,
 ```
 
 Unbound connects to the socket; dns2bgp listens. Auto-list domains are never bulk-resolved.
