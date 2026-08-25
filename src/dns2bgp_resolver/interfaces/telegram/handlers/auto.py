@@ -10,7 +10,6 @@ from dns2bgp_resolver.application.commands import (
     AddExcludeKeywordCommand,
     ListExcludeKeywordsCommand,
     RemoveExcludeKeywordCommand,
-    ResolveNowCommand,
     SearchAutoDomainsCommand,
 )
 from dns2bgp_resolver.container import AppContainer
@@ -68,6 +67,7 @@ async def _render_auto_page(
     header = f"🤖 {title} — стр. {data.page}/{data.pages} ({data.total})"
     if query:
         header = f"🔍 {query!r} — стр. {data.page}/{data.pages} ({data.total})"
+    header += "\n(индекс; IP — через dnstap)"
 
     items = [
         (d.id or 0, d.name, len(d.addresses))
@@ -82,6 +82,7 @@ async def _render_auto_page(
         pages=data.pages,
         back_callback=back_callback,
         query_key=query_key,
+        show_addr_count=False,
     )
     return header, markup
 
@@ -130,60 +131,29 @@ async def cb_host(callback: CallbackQuery, container: AppContainer) -> None:
     if domain is None or domain.source != "auto":
         await callback.answer("Host not found.", show_alert=True)
         return
-    ips = ", ".join(str(a.ip) for a in domain.addresses) or "—"
-    text = f"🌐 {domain.name}\nIP ({len(domain.addresses)}): {ips}"
+    hits = await container.repository.list_passive_hits(limit=500)
+    matched_ips = [h.ip for h in hits if h.matched_name == str(domain.name)]
+    if matched_ips:
+        ips_line = ", ".join(matched_ips[:20])
+        if len(matched_ips) > 20:
+            ips_line += f" … (+{len(matched_ips) - 20})"
+        text = (
+            f"🌐 {domain.name}\n"
+            f"режим: индекс + dnstap\n"
+            f"passive IP ({len(matched_ips)}): {ips_line}"
+        )
+    else:
+        text = (
+            f"🌐 {domain.name}\n"
+            f"режим: индекс + dnstap\n"
+            f"passive IP: пока нет (ждём DNS-запросы)"
+        )
     if callback.message:
         await callback.message.edit_text(
             text,
             reply_markup=auto_host_menu(domain_id, page, query_key=query_key),
         )
     await callback.answer()
-
-
-@router.callback_query(F.data.startswith("a:rs:"))
-async def cb_refresh(callback: CallbackQuery, container: AppContainer) -> None:
-    if not allowed(container, callback.from_user.id if callback.from_user else None):
-        await callback.answer("Access denied.", show_alert=True)
-        return
-    parts = (callback.data or "").split(":")
-    # a:rs:id:page or a:rs:id:page:query_key
-    if len(parts) < 4:
-        await callback.answer("Invalid callback.")
-        return
-    try:
-        domain_id = int(parts[2])
-        page = int(parts[3])
-    except ValueError:
-        await callback.answer("Invalid callback.")
-        return
-    query_key = parts[4] if len(parts) > 4 else None
-
-    domain = await container.repository.get_by_id(domain_id)
-    if domain is None:
-        await callback.answer("Host not found.", show_alert=True)
-        return
-
-    result = await container.bus.execute(ResolveNowCommand(name=str(domain.name)))
-    if not result.ok or not result.data:
-        await callback.answer(result.error or "Error", show_alert=True)
-        return
-    summary = result.data[0]
-    if summary.error:
-        toast = f"ERROR: {summary.error}"
-    elif summary.changed:
-        toast = f"Обновлено: {len(summary.addresses)} IP"
-    else:
-        toast = f"Без изменений: {len(summary.addresses)} IP"
-
-    domain = await container.repository.get_by_id(domain_id)
-    if domain and callback.message:
-        ips = ", ".join(str(a.ip) for a in domain.addresses) or "—"
-        text = f"🌐 {domain.name}\nIP ({len(domain.addresses)}): {ips}"
-        await callback.message.edit_text(
-            text,
-            reply_markup=auto_host_menu(domain_id, page, query_key=query_key),
-        )
-    await callback.answer(toast, show_alert=True)
 
 
 @router.callback_query(F.data == "a:search")
