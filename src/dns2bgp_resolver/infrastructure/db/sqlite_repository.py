@@ -501,18 +501,21 @@ class SqlAlchemyDomainRepository(DomainRepository):
             return int(result.rowcount or 0)
 
     async def clear_list_domains(self, list_id: int) -> int:
-        async with self._session_factory() as session:
-            result = await session.execute(
-                select(DomainRow).where(
+        async with self._write_lock:
+            async with self._session_factory() as session:
+                domain_ids = select(DomainRow.id).where(
                     DomainRow.source == "auto", DomainRow.list_id == list_id
                 )
-            )
-            rows = result.scalars().all()
-            count = len(rows)
-            for row in rows:
-                await session.delete(row)
-            await session.commit()
-            return count
+                await session.execute(
+                    delete(AddressRow).where(AddressRow.domain_id.in_(domain_ids))
+                )
+                result = await session.execute(
+                    delete(DomainRow).where(
+                        DomainRow.source == "auto", DomainRow.list_id == list_id
+                    )
+                )
+                await session.commit()
+                return int(result.rowcount or 0)
 
     async def list_domain_lists(self) -> list[DomainList]:
         async with self._session_factory() as session:
