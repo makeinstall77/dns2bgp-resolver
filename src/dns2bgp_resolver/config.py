@@ -57,6 +57,12 @@ class AutoListSettings(BaseModel):
     confirm_ttl_seconds: int = 3600
 
 
+class DnstapSettings(BaseModel):
+    enabled: bool = False
+    listen_unix: str = "./data/dnstap.sock"
+    socket_mode: int = 0o666
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="DNS2BGP_",
@@ -71,6 +77,7 @@ class Settings(BaseSettings):
     web: WebSettings = Field(default_factory=WebSettings)
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)
     auto_list: AutoListSettings = Field(default_factory=AutoListSettings)
+    dnstap: DnstapSettings = Field(default_factory=DnstapSettings)
 
     @classmethod
     def load(cls, config_path: str | Path | None = None) -> Settings:

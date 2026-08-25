@@ -11,7 +11,13 @@ from dns2bgp_resolver.application.ports.dns_resolver import DnsResolver
 from dns2bgp_resolver.application.ports.repository import DomainRepository
 from dns2bgp_resolver.application.ports.route_exporter import RouteExporter
 from dns2bgp_resolver.config import RefreshSettings
-from dns2bgp_resolver.domain import Domain, DomainName, ip_to_prefix24, is_announcable_ipv4
+from dns2bgp_resolver.domain import (
+    Domain,
+    DomainName,
+    ip_to_prefix24,
+    is_announcable_ipv4,
+    is_announcable_prefix,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +72,9 @@ class ResolvePipeline:
 
     async def resolve_all(self) -> list[ResolveSummary]:
         domains = [
-            d for d in await self._repository.list_all() if d.enabled and d.id is not None
+            d
+            for d in await self._repository.list_all()
+            if d.enabled and d.id is not None and d.source == "manual"
         ]
         return await self._resolve_many(domains)
 
@@ -189,10 +197,33 @@ class ResolvePipeline:
             return True
 
     async def _write_export(self) -> ExportSummary:
-        ips = await self._repository.all_active_ips()
-        prefixes = sorted({ip_to_prefix24(ip) for ip in ips if is_announcable_ipv4(ip)})
-        await self._exporter.export(prefixes)
-        return ExportSummary(prefix_count=len(prefixes), path=self._export_path)
+        prefixes: set[str] = set()
+
+        for ip in await self._repository.all_active_ips():
+            if is_announcable_ipv4(ip):
+                prefixes.add(ip_to_prefix24(ip))
+
+        for ip in await self._repository.list_passive_ips():
+            if is_announcable_ipv4(ip):
+                prefixes.add(ip_to_prefix24(ip))
+
+        for static in await self._repository.list_static_prefixes():
+            if static.enabled and is_announcable_prefix(static.cidr):
+                prefixes.add(static.cidr)
+
+        ordered = sorted(prefixes)
+        await self._exporter.export(ordered)
+        return ExportSummary(prefix_count=len(ordered), path=self._export_path)
+
+    async def record_passive_hit(self, ip: str, matched_name: str) -> bool:
+        """Record dnstap observation; export if new IP. Return True if new."""
+        if not is_announcable_ipv4(ip):
+            return False
+        now = self._clock.now()
+        is_new = await self._repository.upsert_passive_hit(ip, matched_name, seen_at=now)
+        if is_new:
+            await self._request_export()
+        return is_new
 
     async def export_routes(self) -> ExportSummary:
         """Immediate export (CLI/API/startup). Resets coalescing timer."""

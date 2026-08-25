@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from dns2bgp_resolver.application.commands.dto import CommandResult
 from dns2bgp_resolver.application.ports.repository import DomainRepository
-from dns2bgp_resolver.domain import DomainName
+from dns2bgp_resolver.domain import parse_domain_input
 
 
 @dataclass(frozen=True, slots=True)
@@ -18,7 +18,7 @@ class RemoveDomainHandler:
 
     async def handle(self, command: RemoveDomainCommand) -> CommandResult[str]:
         try:
-            name = DomainName(command.name)
+            name, _ = parse_domain_input(command.name)
         except ValueError as exc:
             return CommandResult.failure(str(exc))
 

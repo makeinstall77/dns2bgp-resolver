@@ -15,6 +15,7 @@ from dns2bgp_resolver.application.ports.repository import (
     SyncPendingConfirmation,
 )
 from dns2bgp_resolver.application.ports.sync_alert import SyncAlertNotifier
+from dns2bgp_resolver.application.services.domain_index_service import DomainIndexService
 from dns2bgp_resolver.application.services.resolve_pipeline import ResolvePipeline
 from dns2bgp_resolver.config import AutoListSettings
 from dns2bgp_resolver.domain import DomainName
@@ -97,6 +98,7 @@ class DomainListSyncService:
         clock: Clock,
         downloader: AutoListDownloader | None = None,
         notifier: SyncAlertNotifier | None = None,
+        index_service: DomainIndexService | None = None,
     ) -> None:
         self._repository = repository
         self._pipeline = pipeline
@@ -104,6 +106,10 @@ class DomainListSyncService:
         self._clock = clock
         self._downloader = downloader or HttpxAutoListDownloader()
         self._notifier = notifier or NullSyncAlertNotifier()
+        self._index_service = index_service
+
+    def set_index_service(self, index_service: DomainIndexService) -> None:
+        self._index_service = index_service
 
     def set_notifier(self, notifier: SyncAlertNotifier) -> None:
         self._notifier = notifier
@@ -155,6 +161,8 @@ class DomainListSyncService:
         )
         if result.added or result.removed:
             await self._pipeline.export_after_mutation()
+        if self._index_service is not None:
+            await self._index_service.rebuild()
         return ListSyncResult(
             list_id=list_id,
             list_name=list_name,
