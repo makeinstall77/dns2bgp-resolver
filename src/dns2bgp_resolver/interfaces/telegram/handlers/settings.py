@@ -28,31 +28,41 @@ async def render_settings_summary(container: AppContainer) -> str:
     return f"Settings\nDefault sync interval: {interval}s"
 
 
+async def _back_to_settings(message: Message, container: AppContainer, state: FSMContext) -> None:
+    await state.clear()
+    text = await render_settings_summary(container)
+    await message.answer(text, reply_markup=main_menu_keyboard())
+    await message.answer("Настройки:", reply_markup=settings_menu())
+
+
 @router.callback_query(F.data == "st:interval")
 async def cb_global_interval(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(SetGlobalInterval.waiting_seconds)
     if callback.message:
-        await callback.message.answer("Default sync interval (seconds, min 60):", reply_markup=cancel_keyboard())
+        await callback.message.answer(
+            "Default sync interval (seconds, min 60):", reply_markup=cancel_keyboard()
+        )
     await callback.answer()
 
 
 @router.message(SetGlobalInterval.waiting_seconds, F.text)
 async def set_global_interval(message: Message, container: AppContainer, state: FSMContext) -> None:
     if message.text == BTN_CANCEL:
-        await state.clear()
-        await message.answer("Cancelled.", reply_markup=main_menu_keyboard())
+        await _back_to_settings(message, container, state)
         return
     try:
         seconds = int((message.text or "").strip())
     except ValueError:
-        await message.answer("Enter a number.")
+        await message.answer("Enter a number.", reply_markup=cancel_keyboard())
         return
-    await state.clear()
     result = await container.bus.execute(SetDefaultSyncIntervalCommand(seconds=seconds))
     if not result.ok:
-        await message.answer(f"Error: {result.error}", reply_markup=main_menu_keyboard())
+        await message.answer(f"Error: {result.error}", reply_markup=cancel_keyboard())
         return
-    await message.answer(result.message or "Updated.", reply_markup=main_menu_keyboard())
+    await message.answer(
+        f"{result.message or 'Updated.'}\nЕщё interval или ◀ Отмена:",
+        reply_markup=cancel_keyboard(),
+    )
 
 
 @router.callback_query(F.data == "st:filters")

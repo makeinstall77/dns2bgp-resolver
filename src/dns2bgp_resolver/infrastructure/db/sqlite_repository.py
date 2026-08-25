@@ -684,6 +684,7 @@ class SqlAlchemyDomainRepository(DomainRepository):
                 select(DomainRow)
                 .where(DomainRow.enabled.is_(True))
                 .where(DomainRow.source == "manual")
+                .where(DomainRow.match_mode != "suffix")
                 .where(
                     (DomainRow.next_resolve_at.is_(None)) | (DomainRow.next_resolve_at <= now)
                 )
@@ -698,6 +699,15 @@ class SqlAlchemyDomainRepository(DomainRepository):
                 select(DomainRow.name).where(DomainRow.enabled.is_(True))
             )
             return list(result.scalars().all())
+
+    async def list_index_rules(self) -> list[tuple[str, str]]:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(DomainRow.name, DomainRow.match_mode).where(
+                    DomainRow.enabled.is_(True)
+                )
+            )
+            return [(name, mode or "suffix") for name, mode in result.all()]
 
     async def replace_addresses(
         self,
@@ -762,6 +772,7 @@ class SqlAlchemyDomainRepository(DomainRepository):
                 .join(DomainRow)
                 .where(DomainRow.enabled.is_(True))
                 .where(DomainRow.source == "manual")
+                .where(DomainRow.match_mode != "suffix")
                 .where(AddressRow.family == 4)
             )
             return list(result.scalars().all())

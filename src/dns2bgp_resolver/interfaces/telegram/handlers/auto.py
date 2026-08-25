@@ -164,14 +164,21 @@ async def cb_search(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
+async def _back_to_auto(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer(
+        "Auto domains — только индекс.\nIP появляются по DNS-запросам (dnstap), без pre-resolve.",
+        reply_markup=main_menu_keyboard(),
+    )
+    await message.answer("Выберите действие:", reply_markup=auto_menu())
+
+
 @router.message(SearchAuto.waiting_query, F.text)
 async def search_query(message: Message, container: AppContainer, state: FSMContext) -> None:
     if message.text == BTN_CANCEL:
-        await state.clear()
-        await message.answer("Cancelled.", reply_markup=main_menu_keyboard())
+        await _back_to_auto(message, state)
         return
     query = (message.text or "").strip()
-    await state.clear()
     text, markup = await _render_auto_page(
         container,
         query,
@@ -181,6 +188,7 @@ async def search_query(message: Message, container: AppContainer, state: FSMCont
         with_query_key=True,
     )
     await message.answer(text, reply_markup=markup)
+    await message.answer("Ещё запрос или ◀ Отмена:", reply_markup=cancel_keyboard())
 
 
 @router.callback_query(F.data.startswith("s:"))
@@ -229,18 +237,28 @@ async def cb_filter_add(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
+async def _back_to_filters(message: Message, container: AppContainer, state: FSMContext) -> None:
+    await state.clear()
+    result = await container.bus.execute(ListExcludeKeywordsCommand())
+    keywords = result.data or []
+    text = "🏷 Exclude keywords:" if keywords else "🏷 No exclude keywords."
+    await message.answer(text, reply_markup=main_menu_keyboard())
+    await message.answer("Фильтры:", reply_markup=filters_menu(keywords))
+
+
 @router.message(AddFilter.waiting_keyword, F.text)
 async def filter_add_text(message: Message, container: AppContainer, state: FSMContext) -> None:
     if message.text == BTN_CANCEL:
-        await state.clear()
-        await message.answer("Cancelled.", reply_markup=main_menu_keyboard())
+        await _back_to_filters(message, container, state)
         return
     result = await container.bus.execute(AddExcludeKeywordCommand(keyword=(message.text or "").strip()))
-    await state.clear()
     if not result.ok:
-        await message.answer(f"Error: {result.error}", reply_markup=main_menu_keyboard())
+        await message.answer(f"Error: {result.error}", reply_markup=cancel_keyboard())
         return
-    await message.answer(result.message or "Added.", reply_markup=main_menu_keyboard())
+    await message.answer(
+        f"{result.message or 'Added.'}\nЕщё keyword или ◀ Отмена:",
+        reply_markup=cancel_keyboard(),
+    )
 
 
 @router.callback_query(F.data.startswith("f:rm:"))

@@ -23,6 +23,15 @@ from dns2bgp_resolver.interfaces.telegram.states import AddPrefix, RemovePrefix
 router = Router()
 
 
+async def _back_to_prefixes(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer(
+        "Static prefixes (IP/CIDR) — сразу в bird, без DNS.",
+        reply_markup=main_menu_keyboard(),
+    )
+    await message.answer("Выберите действие:", reply_markup=prefixes_menu())
+
+
 @router.callback_query(F.data == "p:list")
 async def cb_list(callback: CallbackQuery, container: AppContainer) -> None:
     if not allowed(container, callback.from_user.id if callback.from_user else None):
@@ -92,8 +101,7 @@ async def cb_remove_ok(callback: CallbackQuery, container: AppContainer) -> None
 @router.message(AddPrefix.waiting_cidr, F.text)
 async def add_prefix_text(message: Message, container: AppContainer, state: FSMContext) -> None:
     if message.text == BTN_CANCEL:
-        await state.clear()
-        await message.answer("Cancelled.", reply_markup=main_menu_keyboard())
+        await _back_to_prefixes(message, state)
         return
     raw = (message.text or "").strip()
     name = None
@@ -101,11 +109,13 @@ async def add_prefix_text(message: Message, container: AppContainer, state: FSMC
     if " " in raw:
         cidr, name = raw.split(None, 1)
     result = await container.bus.execute(AddPrefixCommand(cidr=cidr, name=name))
-    await state.clear()
     if not result.ok:
-        await message.answer(f"Error: {result.error}", reply_markup=main_menu_keyboard())
+        await message.answer(f"Error: {result.error}", reply_markup=cancel_keyboard())
         return
-    await message.answer(result.message or f"Added {cidr}", reply_markup=main_menu_keyboard())
+    await message.answer(
+        f"{result.message or f'Added {cidr}'}\nЕщё CIDR или ◀ Отмена:",
+        reply_markup=cancel_keyboard(),
+    )
 
 
 @router.message(RemovePrefix.waiting_cidr, F.text)
@@ -113,14 +123,15 @@ async def remove_prefix_text(
     message: Message, container: AppContainer, state: FSMContext
 ) -> None:
     if message.text == BTN_CANCEL:
-        await state.clear()
-        await message.answer("Cancelled.", reply_markup=main_menu_keyboard())
+        await _back_to_prefixes(message, state)
         return
     result = await container.bus.execute(
         RemovePrefixCommand(cidr=(message.text or "").strip())
     )
-    await state.clear()
     if not result.ok:
-        await message.answer(f"Error: {result.error}", reply_markup=main_menu_keyboard())
+        await message.answer(f"Error: {result.error}", reply_markup=cancel_keyboard())
         return
-    await message.answer(result.message or "Removed.", reply_markup=main_menu_keyboard())
+    await message.answer(
+        f"{result.message or 'Removed.'}\nЕщё CIDR или ◀ Отмена:",
+        reply_markup=cancel_keyboard(),
+    )

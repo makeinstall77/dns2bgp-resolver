@@ -213,6 +213,10 @@ class DomainRepository(ABC):
         """All enabled domain names for the in-memory match index."""
 
     @abstractmethod
+    async def list_index_rules(self) -> list[tuple[str, str]]:
+        """Enabled (name, match_mode) pairs for the in-memory match index."""
+
+    @abstractmethod
     async def replace_addresses(
         self,
         domain_id: int,
