@@ -11,6 +11,7 @@ from dns2bgp_resolver.application.commands import (
     ResolveNowCommand,
 )
 from dns2bgp_resolver.container import AppContainer
+from dns2bgp_resolver.domain import format_domain_label
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
 from dns2bgp_resolver.interfaces.telegram.keyboards import (
     BTN_CANCEL,
@@ -41,7 +42,11 @@ async def _render_manual_page(container: AppContainer, page: int) -> tuple[str, 
 
     text = f"📋 Manual — стр. {data.page}/{data.pages} ({data.total})"
     items = [
-        (d.id or 0, d.name, len(d.addresses))
+        (
+            d.id or 0,
+            d.label,
+            None if d.match_mode == "suffix" else len(d.addresses),
+        )
         for d in data.items
         if d.id is not None
     ]
@@ -63,6 +68,24 @@ def _parse_id_page(data: str) -> tuple[int, int] | None:
         return int(parts[2]), int(parts[3])
     except ValueError:
         return None
+
+
+def _host_text(domain) -> str:
+    mode = getattr(domain, "match_mode", "exact") or "exact"
+    label = format_domain_label(str(domain.name), mode)
+    if mode == "suffix":
+        return f"🌐 {label}\nmatch: suffix (поддомены через dnstap)"
+    ips = ", ".join(str(a.ip) for a in domain.addresses) or "—"
+    return f"🌐 {label}\nIP ({len(domain.addresses)}): {ips}"
+
+
+async def _back_to_domains(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer(
+        "Manual domains (pre-resolve).\nМожно: example.com или *.example.com",
+        reply_markup=main_menu_keyboard(),
+    )
+    await message.answer("Выберите действие:", reply_markup=domains_menu())
 
 
 @router.callback_query(F.data == "d:list")
@@ -99,10 +122,12 @@ async def cb_host(callback: CallbackQuery, container: AppContainer) -> None:
     if domain is None or domain.source != "manual":
         await callback.answer("Host not found.", show_alert=True)
         return
-    ips = ", ".join(str(a.ip) for a in domain.addresses) or "—"
-    text = f"🌐 {domain.name}\nIP ({len(domain.addresses)}): {ips}"
     if callback.message:
-        await callback.message.edit_text(text, reply_markup=manual_host_menu(domain_id, page))
+        mode = getattr(domain, "match_mode", "exact") or "exact"
+        await callback.message.edit_text(
+            _host_text(domain),
+            reply_markup=manual_host_menu(domain_id, page, is_mask=mode == "suffix"),
+        )
     await callback.answer()
 
 
@@ -121,6 +146,9 @@ async def cb_refresh(callback: CallbackQuery, container: AppContainer) -> None:
     if domain is None:
         await callback.answer("Host not found.", show_alert=True)
         return
+    if (getattr(domain, "match_mode", None) or "exact") == "suffix":
+        await callback.answer("Маска: IP только через dnstap", show_alert=True)
+        return
 
     result = await container.bus.execute(ResolveNowCommand(name=str(domain.name)))
     if not result.ok or not result.data:
@@ -136,9 +164,11 @@ async def cb_refresh(callback: CallbackQuery, container: AppContainer) -> None:
 
     domain = await container.repository.get_by_id(domain_id)
     if domain and callback.message:
-        ips = ", ".join(str(a.ip) for a in domain.addresses) or "—"
-        text = f"🌐 {domain.name}\nIP ({len(domain.addresses)}): {ips}"
-        await callback.message.edit_text(text, reply_markup=manual_host_menu(domain_id, page))
+        mode = getattr(domain, "match_mode", "exact") or "exact"
+        await callback.message.edit_text(
+            _host_text(domain),
+            reply_markup=manual_host_menu(domain_id, page, is_mask=mode == "suffix"),
+        )
     await callback.answer(toast, show_alert=True)
 
 
@@ -156,9 +186,11 @@ async def cb_remove_prompt(callback: CallbackQuery, container: AppContainer) -> 
     if domain is None:
         await callback.answer("Host not found.", show_alert=True)
         return
+    mode = getattr(domain, "match_mode", "exact") or "exact"
+    label = format_domain_label(str(domain.name), mode)
     if callback.message:
         await callback.message.edit_text(
-            f"Удалить 🌐 {domain.name}?",
+            f"Удалить 🌐 {label}?",
             reply_markup=confirm_remove_host_menu(domain_id, page),
         )
     await callback.answer()
@@ -192,7 +224,10 @@ async def cb_remove_confirm(callback: CallbackQuery, container: AppContainer) ->
 async def cb_add(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(AddDomain.waiting_name)
     if callback.message:
-        await callback.message.answer("Enter domain name:", reply_markup=cancel_keyboard())
+        await callback.message.answer(
+            "Домен или маска:\nexample.com / *.example.com",
+            reply_markup=cancel_keyboard(),
+        )
     await callback.answer()
 
 
@@ -207,27 +242,35 @@ async def cb_remove(callback: CallbackQuery, state: FSMContext) -> None:
 @router.message(AddDomain.waiting_name, F.text)
 async def add_domain_text(message: Message, container: AppContainer, state: FSMContext) -> None:
     if message.text == BTN_CANCEL:
-        await state.clear()
-        await message.answer("Cancelled.", reply_markup=main_menu_keyboard())
+        await _back_to_domains(message, state)
         return
     result = await container.bus.execute(AddDomainCommand(name=(message.text or "").strip()))
-    await state.clear()
     if not result.ok:
-        await message.answer(f"Error: {result.error}", reply_markup=main_menu_keyboard())
+        await message.answer(f"Error: {result.error}", reply_markup=cancel_keyboard())
         return
-    ips = ", ".join(result.data.addresses) if result.data and result.data.addresses else "-"
-    await message.answer(f"Added {message.text}: {ips}", reply_markup=main_menu_keyboard())
+    view = result.data
+    label = view.label if view else (message.text or "")
+    if view and view.match_mode == "suffix":
+        text = f"Added {label}"
+    else:
+        ips = ", ".join(view.addresses) if view and view.addresses else "-"
+        text = f"Added {label}: {ips}"
+    await message.answer(
+        f"{text}\nЕщё домен или ◀ Отмена:",
+        reply_markup=cancel_keyboard(),
+    )
 
 
 @router.message(RemoveDomain.waiting_name, F.text)
 async def remove_domain_text(message: Message, container: AppContainer, state: FSMContext) -> None:
     if message.text == BTN_CANCEL:
-        await state.clear()
-        await message.answer("Cancelled.", reply_markup=main_menu_keyboard())
+        await _back_to_domains(message, state)
         return
     result = await container.bus.execute(RemoveDomainCommand(name=(message.text or "").strip()))
-    await state.clear()
     if not result.ok:
-        await message.answer(f"Error: {result.error}", reply_markup=main_menu_keyboard())
+        await message.answer(f"Error: {result.error}", reply_markup=cancel_keyboard())
         return
-    await message.answer(result.message or "Removed.", reply_markup=main_menu_keyboard())
+    await message.answer(
+        f"{result.message or 'Removed.'}\nЕщё домен или ◀ Отмена:",
+        reply_markup=cancel_keyboard(),
+    )

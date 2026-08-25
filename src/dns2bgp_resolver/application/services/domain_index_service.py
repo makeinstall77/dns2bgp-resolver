@@ -20,7 +20,7 @@ class DomainIndexService:
         return self._index
 
     async def rebuild(self) -> int:
-        names = await self._repository.list_index_names()
-        size = self._index.rebuild(names)
+        rules = await self._repository.list_index_rules()
+        size = self._index.rebuild(rules=rules)
         logger.info("domain index rebuilt: %d name(s)", size)
         return size

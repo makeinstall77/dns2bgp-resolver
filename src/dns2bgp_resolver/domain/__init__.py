@@ -32,18 +32,21 @@ class DomainName:
 
 
 def parse_domain_input(raw: str) -> tuple[DomainName, MatchMode]:
-    """Parse FQDN or *.example.com / .example.com suffix mask."""
-    text = raw.strip().lower().strip(".")
-    mode: MatchMode = "suffix"
+    """Parse FQDN (exact) or *.example.com / .example.com (suffix mask)."""
+    text = raw.strip().lower()
+    mode: MatchMode = "exact"
     if text.startswith("*."):
         text = text[2:]
         mode = "suffix"
     elif text.startswith("."):
         text = text[1:]
         mode = "suffix"
-    name = DomainName(text)
-    # Plan: bare example.com also covers subdomains on DNS path
+    name = DomainName(text.strip("."))
     return name, mode
+
+
+def format_domain_label(name: str, match_mode: MatchMode = "exact") -> str:
+    return f"*.{name}" if match_mode == "suffix" else name
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,7 +156,7 @@ class Domain:
     source: DomainSource = "manual"
     list_id: int | None = None
     enabled: bool = True
-    match_mode: MatchMode = "suffix"
+    match_mode: MatchMode = "exact"
     created_at: datetime | None = None
     next_resolve_at: datetime | None = None
     last_resolved_at: datetime | None = None

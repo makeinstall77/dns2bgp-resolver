@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
 BTN_DOMAINS = "📋 Домены"
 BTN_AUTO = "🤖 Auto"
+BTN_PREFIXES = "🛣 Prefixes"
 BTN_LISTS = "📂 Списки"
 BTN_SETTINGS = "⚙️ Настройки"
-BTN_RESOLVE = "🔄 Resolve all"
+BTN_RESOLVE = "🔄 Resolve manual"
 BTN_CANCEL = "◀ Отмена"
 
 
@@ -12,8 +15,8 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=BTN_DOMAINS), KeyboardButton(text=BTN_AUTO)],
-            [KeyboardButton(text=BTN_LISTS), KeyboardButton(text=BTN_SETTINGS)],
-            [KeyboardButton(text=BTN_RESOLVE)],
+            [KeyboardButton(text=BTN_PREFIXES), KeyboardButton(text=BTN_LISTS)],
+            [KeyboardButton(text=BTN_SETTINGS), KeyboardButton(text=BTN_RESOLVE)],
         ],
         resize_keyboard=True,
     )
@@ -58,20 +61,58 @@ def auto_menu() -> InlineKeyboardMarkup:
     )
 
 
+def prefixes_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📋 List", callback_data="p:list"),
+                InlineKeyboardButton(text="➕ Add", callback_data="p:add"),
+                InlineKeyboardButton(text="🗑 Remove", callback_data="p:rm"),
+            ],
+            [InlineKeyboardButton(text="◀ Назад", callback_data="m:main")],
+        ]
+    )
+
+
+def prefixes_list_keyboard(items: list[tuple[str, str | None]]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for cidr, name in items[:30]:
+        label = f"{cidr}" if not name else f"{cidr} ({name})"
+        if len(label) > 64:
+            label = label[:61] + "…"
+        rows.append(
+            [InlineKeyboardButton(text=f"🗑 {label}", callback_data=f"p:rmok:{cidr}")]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(text="➕ Add", callback_data="p:add"),
+            InlineKeyboardButton(text="◀ Назад", callback_data="m:prefixes"),
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def host_list_keyboard(
     *,
     prefix: str,
-    items: list[tuple[int, str, int]],
+    items: list[tuple[int, str, int | None]],
     page: int,
     pages: int,
     back_callback: str,
     query_key: str | None = None,
+    show_addr_count: bool = True,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for domain_id, name, addr_count in items:
-        label = f"🌐 {name} ({addr_count})"
+        if show_addr_count and addr_count is not None:
+            label = f"🌐 {name} ({addr_count})"
+        else:
+            label = f"🌐 {name}"
         if len(label) > 64:
-            label = f"🌐 {name[:50]}… ({addr_count})"
+            if show_addr_count and addr_count is not None:
+                label = f"🌐 {name[:50]}… ({addr_count})"
+            else:
+                label = f"🌐 {name[:58]}…"
         if query_key is not None:
             cb = f"{prefix}:h:{domain_id}:{page}:{query_key}"
         else:
@@ -95,17 +136,24 @@ def host_list_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def manual_host_menu(domain_id: int, page: int) -> InlineKeyboardMarkup:
+def manual_host_menu(
+    domain_id: int, page: int, *, is_mask: bool = False
+) -> InlineKeyboardMarkup:
+    actions: list[InlineKeyboardButton] = []
+    if not is_mask:
+        actions.append(
+            InlineKeyboardButton(
+                text="🔄 Обновить IP", callback_data=f"d:rs:{domain_id}:{page}"
+            )
+        )
+    actions.append(
+        InlineKeyboardButton(
+            text="🗑 Удалить", callback_data=f"d:rmid:{domain_id}:{page}"
+        )
+    )
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="🔄 Обновить IP", callback_data=f"d:rs:{domain_id}:{page}"
-                ),
-                InlineKeyboardButton(
-                    text="🗑 Удалить", callback_data=f"d:rmid:{domain_id}:{page}"
-                ),
-            ],
+            actions,
             [InlineKeyboardButton(text="◀ К списку", callback_data=f"d:list:{page}")],
         ]
     )
@@ -116,13 +164,10 @@ def auto_host_menu(
 ) -> InlineKeyboardMarkup:
     if query_key is not None:
         back = f"s:{page}:{query_key}"
-        refresh = f"a:rs:{domain_id}:{page}:{query_key}"
     else:
         back = f"a:list:{page}"
-        refresh = f"a:rs:{domain_id}:{page}"
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Обновить IP", callback_data=refresh)],
             [InlineKeyboardButton(text="◀ К списку", callback_data=back)],
         ]
     )
