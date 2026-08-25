@@ -117,9 +117,14 @@ async def pipeline(repo, bird_path: Path):
 
 @pytest.mark.asyncio
 async def test_parse_domain_lines_skips_invalid_and_comments():
-    text = "# comment\nexample.com\n\ninvalid domain\ntest.org\n"
+    text = "# comment\nexample.com\n\ninvalid domain\ntest.org\n*.youtube.com\n.googlevideo.com\n"
     names, skipped = parse_domain_lines(text)
-    assert names == {"example.com", "test.org"}
+    assert names == {
+        "example.com",
+        "test.org",
+        "*.youtube.com",
+        "*.googlevideo.com",
+    }
     assert skipped == 1
 
 
