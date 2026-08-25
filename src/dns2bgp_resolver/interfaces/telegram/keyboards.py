@@ -95,7 +95,7 @@ def prefixes_list_keyboard(items: list[tuple[str, str | None]]) -> InlineKeyboar
 def host_list_keyboard(
     *,
     prefix: str,
-    items: list[tuple[int, str, int]],
+    items: list[tuple[int, str, int | None]],
     page: int,
     pages: int,
     back_callback: str,
@@ -104,12 +104,15 @@ def host_list_keyboard(
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for domain_id, name, addr_count in items:
-        if show_addr_count:
+        if show_addr_count and addr_count is not None:
             label = f"🌐 {name} ({addr_count})"
         else:
             label = f"🌐 {name}"
         if len(label) > 64:
-            label = f"🌐 {name[:50]}… ({addr_count})" if show_addr_count else f"🌐 {name[:58]}…"
+            if show_addr_count and addr_count is not None:
+                label = f"🌐 {name[:50]}… ({addr_count})"
+            else:
+                label = f"🌐 {name[:58]}…"
         if query_key is not None:
             cb = f"{prefix}:h:{domain_id}:{page}:{query_key}"
         else:
@@ -133,17 +136,24 @@ def host_list_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def manual_host_menu(domain_id: int, page: int) -> InlineKeyboardMarkup:
+def manual_host_menu(
+    domain_id: int, page: int, *, is_mask: bool = False
+) -> InlineKeyboardMarkup:
+    actions: list[InlineKeyboardButton] = []
+    if not is_mask:
+        actions.append(
+            InlineKeyboardButton(
+                text="🔄 Обновить IP", callback_data=f"d:rs:{domain_id}:{page}"
+            )
+        )
+    actions.append(
+        InlineKeyboardButton(
+            text="🗑 Удалить", callback_data=f"d:rmid:{domain_id}:{page}"
+        )
+    )
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="🔄 Обновить IP", callback_data=f"d:rs:{domain_id}:{page}"
-                ),
-                InlineKeyboardButton(
-                    text="🗑 Удалить", callback_data=f"d:rmid:{domain_id}:{page}"
-                ),
-            ],
+            actions,
             [InlineKeyboardButton(text="◀ К списку", callback_data=f"d:list:{page}")],
         ]
     )

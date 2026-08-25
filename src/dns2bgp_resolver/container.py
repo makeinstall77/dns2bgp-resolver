@@ -154,6 +154,8 @@ class AddDomainAndResolveHandler:
         result = await self._add.handle(command)
         if result.ok and result.data is not None:
             await self._index_service.rebuild()
+            if result.data.match_mode == "suffix":
+                return result
             name = DomainName(result.data.name)
             await self._pipeline.resolve_one(name)
             updated = await self._repository.get(name)

@@ -51,11 +51,26 @@ def test_domain_index_suffix_match():
 
 
 def test_parse_wildcard():
-    from dns2bgp_resolver.domain import parse_domain_input
+    from dns2bgp_resolver.domain import format_domain_label, parse_domain_input
 
     name, mode = parse_domain_input("*.youtube.com")
     assert str(name) == "youtube.com"
     assert mode == "suffix"
+    assert format_domain_label(str(name), mode) == "*.youtube.com"
+
+    name, mode = parse_domain_input("youtube.com")
+    assert str(name) == "youtube.com"
+    assert mode == "exact"
+    assert format_domain_label(str(name), mode) == "youtube.com"
+
+
+def test_domain_index_exact_vs_suffix():
+    idx = DomainIndex()
+    idx.rebuild(rules=[("exact.com", "exact"), ("suffix.com", "suffix")])
+    assert idx.matches("exact.com") == "exact.com"
+    assert idx.matches("www.exact.com") is None
+    assert idx.matches("a.suffix.com") == "suffix.com"
+    assert idx.matches("suffix.com") == "suffix.com"
 
 
 def test_prefix_keeps_length():
