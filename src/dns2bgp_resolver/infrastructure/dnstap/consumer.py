@@ -71,13 +71,15 @@ async def _read_frame(reader: asyncio.StreamReader) -> tuple[bool, bytes]:
 
 
 async def handshake_as_receiver(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    """Bidirectional fstrm handshake: unbound connects and sends READY first."""
+    """fstrm handshake: uni (START) or bi (READY → ACCEPT → START)."""
     is_ctrl, body = await _read_frame(reader)
     if not is_ctrl:
-        raise ValueError("expected READY control frame")
+        raise ValueError("expected control frame at start of stream")
     ctype, types = _decode_control(body)
+    if ctype == _CONTROL_START:
+        return
     if ctype != _CONTROL_READY:
-        raise ValueError(f"expected READY, got {ctype}")
+        raise ValueError(f"expected READY or START, got {ctype}")
     if types and _CONTENT_TYPE not in types:
         logger.warning("READY content-types=%s", types)
 
@@ -187,13 +189,22 @@ class DnstapUnixServer:
         self._stop = asyncio.Event()
 
     async def start(self) -> None:
+        import os
+
         path = Path(self._path)
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
             path.unlink()
         self._stop.clear()
-        self._server = await asyncio.start_unix_server(self._handle_client, path=str(path))
-        path.chmod(self._socket_mode)
+        # umask 022 → socket 0755 before chmod; unbound needs write to connect (EACCES).
+        old_umask = os.umask(0)
+        try:
+            self._server = await asyncio.start_unix_server(
+                self._handle_client, path=str(path)
+            )
+            path.chmod(self._socket_mode)
+        finally:
+            os.umask(old_umask)
         logger.info("dnstap listening on %s", path)
 
     async def stop(self) -> None:
