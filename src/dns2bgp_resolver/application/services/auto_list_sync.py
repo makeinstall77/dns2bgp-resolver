@@ -18,7 +18,7 @@ from dns2bgp_resolver.application.ports.sync_alert import SyncAlertNotifier
 from dns2bgp_resolver.application.services.domain_index_service import DomainIndexService
 from dns2bgp_resolver.application.services.resolve_pipeline import ResolvePipeline
 from dns2bgp_resolver.config import AutoListSettings
-from dns2bgp_resolver.domain import DomainName
+from dns2bgp_resolver.domain import format_domain_label, parse_domain_input
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,7 @@ class NullSyncAlertNotifier(SyncAlertNotifier):
 
 
 def parse_domain_lines(text: str) -> tuple[set[str], int]:
+    """Parse domain list text. Preserves *.example.com / .example.com as suffix labels."""
     names: set[str] = set()
     skipped = 0
     for line in text.splitlines():
@@ -59,11 +60,24 @@ def parse_domain_lines(text: str) -> tuple[set[str], int]:
         if not raw or raw.startswith("#"):
             continue
         try:
-            names.add(str(DomainName(raw)))
+            name, mode = parse_domain_input(raw)
+            names.add(format_domain_label(str(name), mode))
         except ValueError:
             skipped += 1
             logger.debug("skipped invalid domain line: %r", raw)
     return names, skipped
+
+
+def to_bare_domain_names(labels: set[str]) -> set[str]:
+    """Strip wildcard prefixes; used by auto-list sync (always suffix match)."""
+    bare: set[str] = set()
+    for label in labels:
+        try:
+            name, _ = parse_domain_input(label)
+            bare.add(str(name))
+        except ValueError:
+            continue
+    return bare
 
 
 def apply_keyword_filter(names: set[str], keywords: list[str]) -> set[str]:
@@ -135,7 +149,8 @@ class DomainListSyncService:
                 return set()
             text = domain_list.file_content
 
-        names, skipped_invalid = parse_domain_lines(text)
+        labels, skipped_invalid = parse_domain_lines(text)
+        names = to_bare_domain_names(labels)
         logger.info(
             "list %s: parsed %d domain(s), skipped %d invalid",
             domain_list.name,
