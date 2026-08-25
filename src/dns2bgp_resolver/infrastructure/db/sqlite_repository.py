@@ -614,12 +614,14 @@ class SqlAlchemyDomainRepository(DomainRepository):
                 row = result.scalar_one()
                 return _row_to_domain_list(row)
 
-            session.add(
-                AppSettingRow(
-                    key=DEFAULT_SYNC_INTERVAL_KEY,
-                    value=str(sync_interval),
+            setting = await session.get(AppSettingRow, DEFAULT_SYNC_INTERVAL_KEY)
+            if setting is None:
+                session.add(
+                    AppSettingRow(
+                        key=DEFAULT_SYNC_INTERVAL_KEY,
+                        value=str(sync_interval),
+                    )
                 )
-            )
             list_row = DomainListRow(
                 name=name,
                 type=list_type,
