@@ -147,6 +147,26 @@ def test_parse_import_lines_domains_and_prefixes():
     assert result.skipped == 2
 
 
+def test_format_export_roundtrip_compatible():
+    from dns2bgp_resolver.application.services.list_parse import (
+        format_domains_export,
+        format_prefixes_export,
+        parse_import_lines,
+    )
+
+    domains = format_domains_export(["*.b.com", "a.com", "a.com", "  "])
+    assert domains == "*.b.com\na.com\n"
+    prefixes = format_prefixes_export(
+        [("149.154.160.0/20", "tg"), ("8.8.8.8", None), ("", None)]
+    )
+    assert prefixes == "149.154.160.0/20 tg\n8.8.8.8\n"
+    parsed = parse_import_lines(domains + prefixes)
+    assert parsed.domains == {"*.b.com", "a.com"}
+    assert parsed.prefixes == {"149.154.160.0/20", "8.8.8.8/32"}
+    assert format_domains_export([]) == ""
+    assert format_prefixes_export([]) == ""
+
+
 @pytest.mark.asyncio
 async def test_apply_keyword_filter():
     names = {"casino.example.com", "example.com", "my-casino.org"}

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from dns2bgp_resolver.application.commands import (
     AddPrefixCommand,
     ListPrefixesCommand,
     RemovePrefixCommand,
 )
+from dns2bgp_resolver.application.services.list_parse import format_prefixes_export
 from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
 from dns2bgp_resolver.interfaces.telegram.keyboards import (
@@ -52,6 +53,28 @@ async def cb_list(callback: CallbackQuery, container: AppContainer, ui: BotUi) -
         markup = prefixes_list_keyboard(items)
     if callback.message:
         await ui.edit(callback.message, text, reply_markup=markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "p:export")
+async def cb_export(callback: CallbackQuery, container: AppContainer) -> None:
+    if not allowed(container, callback.from_user.id if callback.from_user else None):
+        await callback.answer("Access denied.", show_alert=True)
+        return
+    result = await container.bus.execute(ListPrefixesCommand())
+    if not result.ok:
+        await callback.answer(result.error or "Error", show_alert=True)
+        return
+    items = [(p.cidr, p.name) for p in (result.data or [])]
+    text = format_prefixes_export(items)
+    if not text:
+        await callback.answer("Список пуст.", show_alert=True)
+        return
+    if callback.message is None:
+        await callback.answer()
+        return
+    doc = BufferedInputFile(text.encode("utf-8"), filename="prefixes.txt")
+    await callback.message.answer_document(doc, caption=f"Prefixes: {len(items)}")
     await callback.answer()
 
 
