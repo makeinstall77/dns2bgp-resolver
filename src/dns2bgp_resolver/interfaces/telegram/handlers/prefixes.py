@@ -58,7 +58,8 @@ async def cb_add(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(AddPrefix.waiting_cidr)
     if callback.message:
         await callback.message.answer(
-            "Введите IPv4 или CIDR (например 149.154.160.0/20):",
+            "Введите IPv4 или CIDR (например 149.154.160.0/20).\n"
+            "Можно несколько строк сразу.",
             reply_markup=cancel_keyboard(),
         )
     await callback.answer()
@@ -103,19 +104,41 @@ async def add_prefix_text(message: Message, container: AppContainer, state: FSMC
     if message.text == BTN_CANCEL:
         await _back_to_prefixes(message, state)
         return
-    raw = (message.text or "").strip()
-    name = None
-    cidr = raw
-    if " " in raw:
-        cidr, name = raw.split(None, 1)
-    result = await container.bus.execute(AddPrefixCommand(cidr=cidr, name=name))
-    if not result.ok:
-        await message.answer(f"Error: {result.error}", reply_markup=cancel_keyboard())
+    lines = [ln.strip() for ln in (message.text or "").splitlines() if ln.strip() and not ln.strip().startswith("#")]
+    if not lines:
+        await message.answer("Введите IPv4 или CIDR.", reply_markup=cancel_keyboard())
         return
-    await message.answer(
-        f"{result.message or f'Added {cidr}'}\nЕщё CIDR или ◀ Отмена:",
-        reply_markup=cancel_keyboard(),
-    )
+
+    added = 0
+    last_ok = ""
+    errors: list[str] = []
+    for raw in lines:
+        name = None
+        cidr = raw
+        if " " in raw:
+            cidr, name = raw.split(None, 1)
+        result = await container.bus.execute(AddPrefixCommand(cidr=cidr, name=name))
+        if result.ok:
+            added += 1
+            last_ok = result.message or f"added {cidr}"
+        else:
+            errors.append(f"{cidr}: {result.error}")
+
+    if len(lines) == 1 and added == 1:
+        await message.answer(
+            f"{last_ok}\nЕщё CIDR (можно несколько строк) или ◀ Отмена:",
+            reply_markup=cancel_keyboard(),
+        )
+        return
+
+    parts = [f"Добавлено: {added}/{len(lines)}"]
+    if errors:
+        parts.append("Ошибки:\n" + "\n".join(f"• {e}" for e in errors[:10]))
+        if len(errors) > 10:
+            parts.append(f"… и ещё {len(errors) - 10}")
+    parts.append("Ещё CIDR (можно несколько строк) или ◀ Отмена:")
+    await message.answer("\n".join(parts), reply_markup=cancel_keyboard())
+
 
 
 @router.message(RemovePrefix.waiting_cidr, F.text)

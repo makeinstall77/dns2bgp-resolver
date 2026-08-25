@@ -45,7 +45,9 @@ async def cmd_start(message: Message, container: AppContainer) -> None:
 @router.message(F.text == BTN_DOMAINS)
 async def btn_domains(message: Message) -> None:
     await message.answer(
-        "Manual domains (pre-resolve).\nМожно: example.com или *.example.com",
+        "Manual domains (pre-resolve).\n"
+        "Можно: example.com или *.example.com\n"
+        "Или .txt: домены и/или CIDR/IP.",
         reply_markup=domains_menu(),
     )
 
@@ -61,7 +63,8 @@ async def btn_auto(message: Message) -> None:
 @router.message(F.text == BTN_PREFIXES)
 async def btn_prefixes(message: Message) -> None:
     await message.answer(
-        "Static prefixes (IP/CIDR) — сразу в bird, без DNS.",
+        "Static prefixes (IP/CIDR) — сразу в bird, без DNS.\n"
+        "Можно прислать .txt со списком CIDR/IP.",
         reply_markup=prefixes_menu(),
     )
 

@@ -225,7 +225,8 @@ async def cb_add(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(AddDomain.waiting_name)
     if callback.message:
         await callback.message.answer(
-            "Домен или маска:\nexample.com / *.example.com",
+            "Домен или маска:\nexample.com / *.example.com\n"
+            "Можно несколько строк сразу.",
             reply_markup=cancel_keyboard(),
         )
     await callback.answer()
@@ -244,21 +245,47 @@ async def add_domain_text(message: Message, container: AppContainer, state: FSMC
     if message.text == BTN_CANCEL:
         await _back_to_domains(message, state)
         return
-    result = await container.bus.execute(AddDomainCommand(name=(message.text or "").strip()))
-    if not result.ok:
-        await message.answer(f"Error: {result.error}", reply_markup=cancel_keyboard())
+    lines = [
+        ln.strip()
+        for ln in (message.text or "").splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
+    ]
+    if not lines:
+        await message.answer("Введите домен или маску.", reply_markup=cancel_keyboard())
         return
-    view = result.data
-    label = view.label if view else (message.text or "")
-    if view and view.match_mode == "suffix":
-        text = f"Added {label}"
-    else:
-        ips = ", ".join(view.addresses) if view and view.addresses else "-"
-        text = f"Added {label}: {ips}"
-    await message.answer(
-        f"{text}\nЕщё домен или ◀ Отмена:",
-        reply_markup=cancel_keyboard(),
-    )
+
+    added = 0
+    last_text = ""
+    errors: list[str] = []
+    for name in lines:
+        result = await container.bus.execute(AddDomainCommand(name=name))
+        if result.ok:
+            added += 1
+            view = result.data
+            label = view.label if view else name
+            if view and view.match_mode == "suffix":
+                last_text = f"Added {label}"
+            else:
+                ips = ", ".join(view.addresses) if view and view.addresses else "-"
+                last_text = f"Added {label}: {ips}"
+        else:
+            errors.append(f"{name}: {result.error}")
+
+    if len(lines) == 1 and added == 1:
+        await message.answer(
+            f"{last_text}\nЕщё домен (можно несколько строк) или ◀ Отмена:",
+            reply_markup=cancel_keyboard(),
+        )
+        return
+
+    parts = [f"Добавлено: {added}/{len(lines)}"]
+    if errors:
+        parts.append("Ошибки:\n" + "\n".join(f"• {e}" for e in errors[:10]))
+        if len(errors) > 10:
+            parts.append(f"… и ещё {len(errors) - 10}")
+    parts.append("Ещё домен (можно несколько строк) или ◀ Отмена:")
+    await message.answer("\n".join(parts), reply_markup=cancel_keyboard())
+
 
 
 @router.message(RemoveDomain.waiting_name, F.text)
