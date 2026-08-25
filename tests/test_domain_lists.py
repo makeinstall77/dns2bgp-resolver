@@ -69,6 +69,19 @@ async def test_clear_vs_remove(repo):
 
 
 @pytest.mark.asyncio
+async def test_clear_list_domains_bulk(repo):
+    created = await repo.add_domain_list(
+        DomainListCreate(name="big", type="url", url="http://big", enabled=True)
+    )
+    names = {f"d{i}.example.com" for i in range(2000)}
+    await repo.sync_list_domains(created.id, names)
+    cleared = await repo.clear_list_domains(created.id)
+    assert cleared == 2000
+    _, total = await repo.search_auto("")
+    assert total == 0
+
+
+@pytest.mark.asyncio
 async def test_default_sync_interval(repo):
     assert await repo.get_default_sync_interval() == 86400
     await repo.set_default_sync_interval(7200)
