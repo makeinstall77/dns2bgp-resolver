@@ -10,13 +10,16 @@ import typer
 from dns2bgp_resolver.application.commands import (
     AddDomainCommand,
     AddDomainListCommand,
+    AddPrefixCommand,
     ClearDomainListCommand,
     ExportRoutesCommand,
     GetSettingsCommand,
     ListDomainListsCommand,
     ListDomainsCommand,
+    ListPrefixesCommand,
     RemoveDomainCommand,
     RemoveDomainListCommand,
+    RemovePrefixCommand,
     ResolveNowCommand,
     SetDefaultSyncIntervalCommand,
     SyncAutoListCommand,
@@ -29,8 +32,10 @@ from dns2bgp_resolver.container import AppContainer, build_container
 app = typer.Typer(name="dns2bgp", help="DNS → BGP pool resolver for VPN traffic steering", no_args_is_help=True)
 lists_app = typer.Typer(name="lists", help="Manage domain lists")
 settings_app = typer.Typer(name="settings", help="Runtime settings")
+prefixes_app = typer.Typer(name="prefixes", help="Static IP/CIDR prefixes")
 app.add_typer(lists_app)
 app.add_typer(settings_app)
+app.add_typer(prefixes_app)
 logger = logging.getLogger(__name__)
 
 
@@ -74,7 +79,7 @@ def main(
 @app.command("add")
 def add_domain(
     ctx: typer.Context,
-    name: str = typer.Argument(..., help="Domain name to track"),
+    name: str = typer.Argument(..., help="Domain or *.example.com suffix mask"),
 ) -> None:
     """Add a domain, resolve it, and update the bird include file."""
 
@@ -86,6 +91,57 @@ def add_domain(
         view = result.data
         ips = ", ".join(view.addresses) if view and view.addresses else "(none yet)"
         typer.echo(f"{result.message}: {ips}")
+
+    _run(_with_container(ctx.obj["config"], _action))
+
+
+@prefixes_app.command("add")
+def prefixes_add(
+    ctx: typer.Context,
+    cidr: str = typer.Argument(..., help="IPv4 address or CIDR (e.g. 149.154.160.0/20)"),
+    name: str = typer.Option("", "--name", "-n", help="Optional label"),
+) -> None:
+    async def _action(container: AppContainer):
+        result = await container.bus.execute(
+            AddPrefixCommand(cidr=cidr, name=name.strip() or None)
+        )
+        if not result.ok:
+            typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        typer.echo(result.message)
+
+    _run(_with_container(ctx.obj["config"], _action))
+
+
+@prefixes_app.command("remove")
+def prefixes_remove(
+    ctx: typer.Context,
+    cidr: str = typer.Argument(...),
+) -> None:
+    async def _action(container: AppContainer):
+        result = await container.bus.execute(RemovePrefixCommand(cidr=cidr))
+        if not result.ok:
+            typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        typer.echo(result.message)
+
+    _run(_with_container(ctx.obj["config"], _action))
+
+
+@prefixes_app.command("list")
+def prefixes_list(ctx: typer.Context) -> None:
+    async def _action(container: AppContainer):
+        result = await container.bus.execute(ListPrefixesCommand())
+        if not result.ok:
+            typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        items = result.data or []
+        if not items:
+            typer.echo("(no static prefixes)")
+            return
+        for item in items:
+            label = f"\t{item.name}" if item.name else ""
+            typer.echo(f"{item.cidr}{label}")
 
     _run(_with_container(ctx.obj["config"], _action))
 

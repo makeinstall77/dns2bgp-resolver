@@ -3,11 +3,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from ipaddress import IPv4Address, IPv4Network, ip_address
+from ipaddress import IPv4Address, IPv4Network, ip_address, ip_network
 from typing import Literal, Self
 
 DomainSource = Literal["manual", "auto"]
 DomainListType = Literal["url", "file"]
+MatchMode = Literal["exact", "suffix"]
+PrefixSource = Literal["static", "passive", "manual"]
 
 
 _DOMAIN_RE = re.compile(
@@ -27,6 +29,21 @@ class DomainName:
 
     def __str__(self) -> str:
         return self.value
+
+
+def parse_domain_input(raw: str) -> tuple[DomainName, MatchMode]:
+    """Parse FQDN or *.example.com / .example.com suffix mask."""
+    text = raw.strip().lower().strip(".")
+    mode: MatchMode = "suffix"
+    if text.startswith("*."):
+        text = text[2:]
+        mode = "suffix"
+    elif text.startswith("."):
+        text = text[1:]
+        mode = "suffix"
+    name = DomainName(text)
+    # Plan: bare example.com also covers subdomains on DNS path
+    return name, mode
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +86,47 @@ def is_announcable_ipv4(ip: str) -> bool:
     )
 
 
+def is_announcable_prefix(cidr: str) -> bool:
+    net = IPv4Network(cidr, strict=False)
+    return not (
+        net.is_private
+        or net.is_loopback
+        or net.is_multicast
+        or net.is_link_local
+        or net.is_reserved
+        or net.is_unspecified
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class Prefix:
+    """IPv4 prefix for bird export. Static CIDRs keep original length."""
+
+    cidr: str
+    source: PrefixSource = "static"
+    name: str | None = None
+
+    def __post_init__(self) -> None:
+        net = ip_network(self.cidr, strict=False)
+        if net.version != 4:
+            raise ValueError(f"IPv6 is not enabled: {self.cidr}")
+        object.__setattr__(self, "cidr", str(net))
+
+    @classmethod
+    def from_ip24(cls, ip: str, *, source: PrefixSource = "manual") -> Self:
+        return cls(cidr=ip_to_prefix24(ip), source=source)
+
+    @classmethod
+    def parse(cls, raw: str, *, source: PrefixSource = "static", name: str | None = None) -> Self:
+        text = raw.strip()
+        if "/" not in text:
+            text = f"{text}/32"
+        return cls(cidr=text, source=source, name=name)
+
+    def __str__(self) -> str:
+        return self.cidr
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedAddress:
     ip: IpAddress
@@ -95,6 +153,7 @@ class Domain:
     source: DomainSource = "manual"
     list_id: int | None = None
     enabled: bool = True
+    match_mode: MatchMode = "suffix"
     created_at: datetime | None = None
     next_resolve_at: datetime | None = None
     last_resolved_at: datetime | None = None
@@ -102,5 +161,35 @@ class Domain:
     addresses: list[ResolvedAddress] = field(default_factory=list)
 
     @classmethod
-    def create(cls, name: str, *, source: DomainSource = "manual") -> Self:
-        return cls(name=DomainName(name), source=source)
+    def create(
+        cls,
+        name: str,
+        *,
+        source: DomainSource = "manual",
+        match_mode: MatchMode | None = None,
+    ) -> Self:
+        parsed, mode = parse_domain_input(name)
+        return cls(name=parsed, source=source, match_mode=match_mode or mode)
+
+
+@dataclass(frozen=True, slots=True)
+class StaticPrefix:
+    cidr: str
+    id: int | None = None
+    name: str | None = None
+    enabled: bool = True
+    created_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        net = ip_network(self.cidr, strict=False)
+        if net.version != 4:
+            raise ValueError(f"IPv6 is not enabled: {self.cidr}")
+        object.__setattr__(self, "cidr", str(net))
+
+
+@dataclass(frozen=True, slots=True)
+class PassiveHit:
+    ip: str
+    matched_name: str
+    last_seen: datetime | None = None
+    first_seen: datetime | None = None

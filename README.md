@@ -68,16 +68,45 @@ cp config.example.yaml config.yaml
 
 ```bash
 dns2bgp add example.com
+dns2bgp add '*.youtube.com'
+dns2bgp prefixes add 149.154.160.0/20 --name telegram
+dns2bgp prefixes list
 dns2bgp list
-dns2bgp resolve              # all domains
+dns2bgp resolve              # all manual domains
 dns2bgp resolve example.com
 dns2bgp export
-dns2bgp serve                # scheduler + web + telegram
+dns2bgp serve                # scheduler + web + telegram (+ dnstap if enabled)
 ```
 
 ## Bird integration
 
 The service atomically writes an include file (default `./data/dns2bgp.routes`). Bird reads that file on start/reload; if the resolver dies, bird keeps the last good routes. If bird is down, the resolver still updates the file.
+
+Prefix pool sources:
+
+- **manual domains** — active DNS resolve (TTL-based refresh); `*.example.com` / `example.com` also match subdomains via dnstap
+- **auto domain lists** — synced into an in-memory index (no pre-resolve); IPs appear when unbound answers matching queries (dnstap)
+- **static prefixes** — CIDR/IP as-is (`dns2bgp prefixes add 149.154.160.0/20`)
+
+### Unbound dnstap (recommended)
+
+Run dns2bgp next to unbound (or share the socket path). In `config.yaml`:
+
+```yaml
+dnstap:
+  enabled: true
+  listen_unix: "/var/lib/dns2bgp/dnstap.sock"
+```
+
+In `unbound.conf`:
+
+```
+dnstap-enable: yes
+dnstap-socket-path: "/var/lib/dns2bgp/dnstap.sock"
+dnstap-send-client-response: yes
+```
+
+Unbound connects to the socket; dns2bgp listens. Auto-list domains are never bulk-resolved.
 
 In `bird.conf`:
 

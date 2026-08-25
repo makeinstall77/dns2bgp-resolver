@@ -23,6 +23,8 @@ async def run_services(
     await container.scheduler.start()
     if container.settings.auto_list.enabled:
         await container.auto_sync_scheduler.start()
+    if container.dnstap_server is not None:
+        await container.dnstap_server.start()
     await container.pipeline.export_routes()
 
     tasks: list[asyncio.Task] = []
@@ -42,6 +44,8 @@ async def run_services(
         for task in tasks:
             if not task.done():
                 task.cancel()
+        if container.dnstap_server is not None:
+            await container.dnstap_server.stop()
         await container.scheduler.stop()
         await container.auto_sync_scheduler.stop()
         await container.pipeline.flush_pending_export()
