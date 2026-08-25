@@ -4,13 +4,13 @@ from dataclasses import dataclass
 
 from dns2bgp_resolver.application.commands.dto import CommandResult, ResolveSummary
 from dns2bgp_resolver.application.services.resolve_pipeline import ResolvePipeline
-from dns2bgp_resolver.domain import DomainName
+from dns2bgp_resolver.domain import parse_domain_input
 
 
 @dataclass(frozen=True, slots=True)
 class ResolveNowCommand:
     name: str | None = None
-    """If None, resolve all enabled domains."""
+    """If None, resolve all enabled manual domains."""
 
 
 class ResolveNowHandler:
@@ -22,7 +22,7 @@ class ResolveNowHandler:
             summaries = await self._pipeline.resolve_all()
         else:
             try:
-                name = DomainName(command.name)
+                name, _ = parse_domain_input(command.name)
             except ValueError as exc:
                 return CommandResult.failure(str(exc))
             summary = await self._pipeline.resolve_one(name)

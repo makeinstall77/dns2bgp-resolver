@@ -20,9 +20,11 @@ from dns2bgp_resolver.application.commands import (
 from dns2bgp_resolver.application.ports.clock import Clock
 from dns2bgp_resolver.application.ports.dns_resolver import DnsResolver
 from dns2bgp_resolver.application.services.resolve_pipeline import ResolvePipeline
+from dns2bgp_resolver.application.services.domain_index_service import DomainIndexService
 from dns2bgp_resolver.config import BirdSettings, RefreshSettings
 from dns2bgp_resolver.container import AddDomainAndResolveHandler, RemoveDomainAndExportHandler
 from dns2bgp_resolver.domain import DomainName, IpAddress, ResolvedAddress
+from dns2bgp_resolver.domain.domain_index import DomainIndex
 from dns2bgp_resolver.infrastructure.bird.static_file_exporter import StaticFileBirdExporter
 from dns2bgp_resolver.infrastructure.db.sqlite_repository import SqlAlchemyDomainRepository
 
@@ -84,9 +86,12 @@ async def pipeline(repo, bird_path: Path):
 @pytest.fixture
 async def bus(repo, pipeline):
     pipe, _, _ = pipeline
+    index_service = DomainIndexService(repo, DomainIndex())
     command_bus = CommandBus()
-    command_bus.register(AddDomainCommand, AddDomainAndResolveHandler(repo, pipe))
-    command_bus.register(RemoveDomainCommand, RemoveDomainAndExportHandler(repo, pipe))
+    command_bus.register(AddDomainCommand, AddDomainAndResolveHandler(repo, pipe, index_service))
+    command_bus.register(
+        RemoveDomainCommand, RemoveDomainAndExportHandler(repo, pipe, index_service)
+    )
     command_bus.register(ListDomainsCommand, ListDomainsHandler(repo))
     command_bus.register(ResolveNowCommand, ResolveNowHandler(pipe))
     command_bus.register(ExportRoutesCommand, ExportRoutesHandler(pipe))

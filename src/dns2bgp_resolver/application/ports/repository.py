@@ -4,7 +4,14 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 
-from dns2bgp_resolver.domain import Domain, DomainList, DomainName, ResolvedAddress
+from dns2bgp_resolver.domain import (
+    Domain,
+    DomainList,
+    DomainName,
+    PassiveHit,
+    ResolvedAddress,
+    StaticPrefix,
+)
 
 
 DEFAULT_SYNC_INTERVAL_KEY = "default_sync_interval"
@@ -199,7 +206,11 @@ class DomainRepository(ABC):
 
     @abstractmethod
     async def list_due(self, now: datetime) -> list[Domain]:
-        """Enabled domains with next_resolve_at <= now (or never resolved)."""
+        """Enabled *manual* domains with next_resolve_at <= now (or never resolved)."""
+
+    @abstractmethod
+    async def list_index_names(self) -> list[str]:
+        """All enabled domain names for the in-memory match index."""
 
     @abstractmethod
     async def replace_addresses(
@@ -225,4 +236,30 @@ class DomainRepository(ABC):
 
     @abstractmethod
     async def all_active_ips(self) -> list[str]:
-        """All IPv4 addresses for enabled domains (for bird export)."""
+        """IPv4 addresses for enabled *manual* domains (active resolve)."""
+
+    @abstractmethod
+    async def add_static_prefix(self, prefix: StaticPrefix) -> StaticPrefix:
+        ...
+
+    @abstractmethod
+    async def remove_static_prefix(self, cidr: str) -> bool:
+        ...
+
+    @abstractmethod
+    async def list_static_prefixes(self) -> list[StaticPrefix]:
+        ...
+
+    @abstractmethod
+    async def upsert_passive_hit(
+        self, ip: str, matched_name: str, *, seen_at: datetime
+    ) -> bool:
+        """Insert or refresh passive hit. Return True if IP is new."""
+
+    @abstractmethod
+    async def list_passive_ips(self) -> list[str]:
+        ...
+
+    @abstractmethod
+    async def list_passive_hits(self, *, limit: int = 100) -> list[PassiveHit]:
+        ...

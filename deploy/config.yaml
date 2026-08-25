@@ -33,3 +33,8 @@ auto_list:
   sync_interval: 86400
   sync_on_startup: true
   exclude_keywords: []
+
+dnstap:
+  enabled: false
+  listen_unix: "/var/lib/dns2bgp/dnstap.sock"
+  socket_mode: 438

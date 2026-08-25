@@ -9,6 +9,7 @@ from dns2bgp_resolver.application.ports.repository import (
     DomainRepository,
 )
 from dns2bgp_resolver.application.services.auto_list_sync import DomainListSyncService
+from dns2bgp_resolver.application.services.domain_index_service import DomainIndexService
 from dns2bgp_resolver.application.services.resolve_pipeline import ResolvePipeline
 
 
@@ -120,9 +121,15 @@ class RemoveDomainListCommand:
 
 
 class RemoveDomainListAndExportHandler:
-    def __init__(self, repository: DomainRepository, pipeline: ResolvePipeline) -> None:
+    def __init__(
+        self,
+        repository: DomainRepository,
+        pipeline: ResolvePipeline,
+        index_service: DomainIndexService | None = None,
+    ) -> None:
         self._repository = repository
         self._pipeline = pipeline
+        self._index_service = index_service
 
     async def handle(self, command: RemoveDomainListCommand) -> CommandResult[str]:
         existing = await self._repository.get_domain_list(command.id)
@@ -132,6 +139,8 @@ class RemoveDomainListAndExportHandler:
         removed = await self._repository.remove_domain_list(command.id)
         if not removed:
             return CommandResult.failure(f"list not found: {command.id}")
+        if self._index_service is not None:
+            await self._index_service.rebuild()
         await self._pipeline.export_after_mutation()
         return CommandResult.success(existing.name, message=f"removed list {existing.name}")
 
@@ -142,15 +151,23 @@ class ClearDomainListCommand:
 
 
 class ClearDomainListHandler:
-    def __init__(self, repository: DomainRepository, pipeline: ResolvePipeline) -> None:
+    def __init__(
+        self,
+        repository: DomainRepository,
+        pipeline: ResolvePipeline,
+        index_service: DomainIndexService | None = None,
+    ) -> None:
         self._repository = repository
         self._pipeline = pipeline
+        self._index_service = index_service
 
     async def handle(self, command: ClearDomainListCommand) -> CommandResult[int]:
         existing = await self._repository.get_domain_list(command.id)
         if existing is None:
             return CommandResult.failure(f"list not found: {command.id}")
         count = await self._repository.clear_list_domains(command.id)
+        if self._index_service is not None:
+            await self._index_service.rebuild()
         await self._pipeline.export_after_mutation()
         return CommandResult.success(count, message=f"cleared {count} domain(s) from {existing.name}")
 
