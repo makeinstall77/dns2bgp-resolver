@@ -82,6 +82,25 @@ async def test_clear_list_domains_bulk(repo):
 
 
 @pytest.mark.asyncio
+async def test_seed_after_list_removed(repo):
+    created = await repo.add_domain_list(
+        DomainListCreate(name="old", type="url", url="http://old", enabled=True)
+    )
+    await repo.set_default_sync_interval(86400)
+    await repo.clear_list_domains(created.id)
+    assert await repo.remove_domain_list(created.id) is True
+
+    seeded = await repo.seed_domain_list(
+        name="antifilter",
+        list_type="url",
+        url="http://new",
+        sync_interval=86400,
+    )
+    assert seeded.name == "antifilter"
+    assert await repo.get_default_sync_interval() == 86400
+
+
+@pytest.mark.asyncio
 async def test_default_sync_interval(repo):
     assert await repo.get_default_sync_interval() == 86400
     await repo.set_default_sync_interval(7200)
