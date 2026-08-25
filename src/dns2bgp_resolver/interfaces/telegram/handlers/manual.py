@@ -100,7 +100,12 @@ async def cb_host(callback: CallbackQuery, container: AppContainer) -> None:
         await callback.answer("Host not found.", show_alert=True)
         return
     ips = ", ".join(str(a.ip) for a in domain.addresses) or "—"
-    text = f"🌐 {domain.name}\nIP ({len(domain.addresses)}): {ips}"
+    mode = getattr(domain, "match_mode", "suffix") or "suffix"
+    text = (
+        f"🌐 {domain.name}\n"
+        f"match: {mode} (поддомены через dnstap)\n"
+        f"IP ({len(domain.addresses)}): {ips}"
+    )
     if callback.message:
         await callback.message.edit_text(text, reply_markup=manual_host_menu(domain_id, page))
     await callback.answer()
@@ -192,7 +197,10 @@ async def cb_remove_confirm(callback: CallbackQuery, container: AppContainer) ->
 async def cb_add(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(AddDomain.waiting_name)
     if callback.message:
-        await callback.message.answer("Enter domain name:", reply_markup=cancel_keyboard())
+        await callback.message.answer(
+            "Домен или маска:\nexample.com / *.example.com",
+            reply_markup=cancel_keyboard(),
+        )
     await callback.answer()
 
 
