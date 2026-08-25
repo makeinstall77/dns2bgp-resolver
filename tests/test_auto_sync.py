@@ -128,6 +128,25 @@ async def test_parse_domain_lines_skips_invalid_and_comments():
     assert skipped == 1
 
 
+def test_parse_import_lines_domains_and_prefixes():
+    from dns2bgp_resolver.application.services.list_parse import parse_import_lines
+
+    text = (
+        "# mix\n"
+        "example.com\n"
+        "*.youtube.com\n"
+        "149.154.160.0/20\n"
+        "8.8.8.8\n"
+        "192.168.1.0/24\n"
+        "not a thing\n"
+        "1.2.3.0/24 telegram\n"
+    )
+    result = parse_import_lines(text)
+    assert result.domains == {"example.com", "*.youtube.com"}
+    assert result.prefixes == {"149.154.160.0/20", "8.8.8.8/32", "1.2.3.0/24"}
+    assert result.skipped == 2
+
+
 @pytest.mark.asyncio
 async def test_apply_keyword_filter():
     names = {"casino.example.com", "example.com", "my-casino.org"}

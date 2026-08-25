@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import logging
 import secrets
+from dataclasses import dataclass
 
 from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.types import CallbackQuery, Message
 
-from dns2bgp_resolver.application.commands import AddDomainCommand
-from dns2bgp_resolver.application.services.auto_list_sync import parse_domain_lines
+from dns2bgp_resolver.application.commands import AddDomainCommand, AddPrefixCommand
+from dns2bgp_resolver.application.services.list_parse import parse_import_lines
 from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
 from dns2bgp_resolver.interfaces.telegram.keyboards import confirm_import_menu, main_menu_keyboard
@@ -17,20 +18,28 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 _MAX_FILE_BYTES = 2 * 1024 * 1024
-_MAX_DOMAINS = 5000
-_pending: dict[str, list[str]] = {}
+_MAX_ITEMS = 5000
 
 
-def _store_pending(names: list[str]) -> str:
+@dataclass(frozen=True, slots=True)
+class _PendingImport:
+    domains: list[str]
+    prefixes: list[str]
+
+
+_pending: dict[str, _PendingImport] = {}
+
+
+def _store_pending(domains: list[str], prefixes: list[str]) -> str:
     token = secrets.token_hex(4)
-    _pending[token] = names
+    _pending[token] = _PendingImport(domains=domains, prefixes=prefixes)
     if len(_pending) > 50:
         for old in list(_pending)[:20]:
             _pending.pop(old, None)
     return token
 
 
-def _pop_pending(token: str) -> list[str] | None:
+def _pop_pending(token: str) -> _PendingImport | None:
     return _pending.pop(token, None)
 
 
@@ -63,41 +72,56 @@ async def on_document(message: Message, container: AppContainer) -> None:
     raw = file.read()
     if _looks_like_binary(raw):
         await message.answer(
-            "Не похоже на текстовый список доменов.",
+            "Не похоже на текстовый список доменов/префиксов.",
             reply_markup=main_menu_keyboard(),
         )
         return
 
     text = raw.decode("utf-8", errors="replace")
-    names_set, skipped_invalid = parse_domain_lines(text)
-    names = sorted(names_set)
-    if not names:
+    parsed = parse_import_lines(text)
+    domains = sorted(parsed.domains)
+    prefixes = sorted(parsed.prefixes)
+    if not domains and not prefixes:
         await message.answer(
-            "Не удалось найти домены (ожидается один домен на строку).",
+            "Не удалось найти домены или префиксы "
+            "(один домен/CIDR/IP на строку, # — комментарий).",
             reply_markup=main_menu_keyboard(),
         )
         return
 
-    if len(names) > _MAX_DOMAINS:
+    total = len(domains) + len(prefixes)
+    if total > _MAX_ITEMS:
         await message.answer(
-            f"Слишком много доменов: {len(names)} (макс. {_MAX_DOMAINS}).",
+            f"Слишком много записей: {total} (макс. {_MAX_ITEMS}).",
             reply_markup=main_menu_keyboard(),
         )
         return
 
-    token = _store_pending(names)
+    token = _store_pending(domains, prefixes)
     fname = message.document.file_name or "file"
-    lines = [
-        f"📄 {fname}",
-        f"Найдено доменов: {len(names)}",
-    ]
-    if skipped_invalid:
-        lines.append(f"Пропущено некорректных строк: {skipped_invalid}")
-    preview = names[:10]
-    lines.append("Примеры:\n" + "\n".join(f"• {n}" for n in preview))
-    if len(names) > 10:
-        lines.append(f"… и ещё {len(names) - 10}")
-    lines.append("\nИмпортировать в ручной список (с резолвом IP)?")
+    lines = [f"📄 {fname}"]
+    if domains:
+        lines.append(f"Доменов: {len(domains)}")
+    if prefixes:
+        lines.append(f"Префиксов: {len(prefixes)}")
+    if parsed.skipped:
+        lines.append(f"Пропущено некорректных строк: {parsed.skipped}")
+
+    preview_items: list[str] = []
+    for n in domains[:5]:
+        preview_items.append(f"• {n}")
+    for c in prefixes[: 10 - len(preview_items)]:
+        preview_items.append(f"• {c}")
+    lines.append("Примеры:\n" + "\n".join(preview_items))
+    if total > len(preview_items):
+        lines.append(f"… и ещё {total - len(preview_items)}")
+
+    dest: list[str] = []
+    if domains:
+        dest.append("ручной список (с резолвом)")
+    if prefixes:
+        dest.append("static prefixes → bird")
+    lines.append("\nИмпортировать в " + " и ".join(dest) + "?")
     await message.answer("\n".join(lines), reply_markup=confirm_import_menu(token))
 
 
@@ -107,36 +131,49 @@ async def cb_import_ok(callback: CallbackQuery, container: AppContainer) -> None
         await callback.answer("Access denied.", show_alert=True)
         return
     token = (callback.data or "").split(":", 2)[-1]
-    names = _pop_pending(token)
-    if not names:
+    pending = _pop_pending(token)
+    if not pending:
         await callback.answer("Импорт устарел. Пришлите файл снова.", show_alert=True)
         return
 
     await callback.answer()
+    total = len(pending.domains) + len(pending.prefixes)
     if callback.message:
-        await callback.message.edit_text(f"⏳ Импорт {len(names)} домен(ов)…")
+        await callback.message.edit_text(f"⏳ Импорт {total} запис(ей)…")
 
-    added = 0
-    exists = 0
-    errors = 0
-    for name in names:
+    d_added = d_exists = d_errors = 0
+    for name in pending.domains:
         result = await container.bus.execute(AddDomainCommand(name=name))
         if result.ok:
-            added += 1
+            d_added += 1
         elif result.error and "already exists" in result.error.lower():
-            exists += 1
+            d_exists += 1
         else:
-            errors += 1
-            logger.warning("import failed for %s: %s", name, result.error)
+            d_errors += 1
+            logger.warning("import domain failed for %s: %s", name, result.error)
 
-    summary = (
-        f"✅ Импорт завершён.\n"
-        f"Добавлено: {added}\n"
-        f"Уже были: {exists}\n"
-        f"Ошибки: {errors}"
-    )
+    p_added = p_exists = p_errors = 0
+    for cidr in pending.prefixes:
+        result = await container.bus.execute(AddPrefixCommand(cidr=cidr))
+        if result.ok:
+            p_added += 1
+        elif result.error and "already exists" in result.error.lower():
+            p_exists += 1
+        else:
+            p_errors += 1
+            logger.warning("import prefix failed for %s: %s", cidr, result.error)
+
+    parts = ["✅ Импорт завершён."]
+    if pending.domains:
+        parts.append(
+            f"Домены — добавлено: {d_added}, уже были: {d_exists}, ошибки: {d_errors}"
+        )
+    if pending.prefixes:
+        parts.append(
+            f"Префиксы — добавлено: {p_added}, уже были: {p_exists}, ошибки: {p_errors}"
+        )
     if callback.message:
-        await callback.message.edit_text(summary)
+        await callback.message.edit_text("\n".join(parts))
         await callback.message.answer("Готово.", reply_markup=main_menu_keyboard())
 
 
