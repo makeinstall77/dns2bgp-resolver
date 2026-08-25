@@ -184,6 +184,13 @@ async def cb_confirm(callback: CallbackQuery, container: AppContainer) -> None:
     await callback.answer()
 
 
+async def _back_to_lists(message: Message, container: AppContainer, state: FSMContext) -> None:
+    await state.clear()
+    text, markup = await render_lists_menu(container)
+    await message.answer(text, reply_markup=main_menu_keyboard())
+    await message.answer("Списки:", reply_markup=markup)
+
+
 @router.callback_query(F.data == "l:addurl")
 async def cb_add_url(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(AddListUrl.waiting_name)
@@ -193,10 +200,9 @@ async def cb_add_url(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(AddListUrl.waiting_name, F.text)
-async def add_url_name(message: Message, state: FSMContext) -> None:
+async def add_url_name(message: Message, container: AppContainer, state: FSMContext) -> None:
     if message.text == BTN_CANCEL:
-        await state.clear()
-        await message.answer("Cancelled.", reply_markup=main_menu_keyboard())
+        await _back_to_lists(message, container, state)
         return
     await state.update_data(name=(message.text or "").strip())
     await state.set_state(AddListUrl.waiting_url)
@@ -206,18 +212,21 @@ async def add_url_name(message: Message, state: FSMContext) -> None:
 @router.message(AddListUrl.waiting_url, F.text)
 async def add_url_url(message: Message, container: AppContainer, state: FSMContext) -> None:
     if message.text == BTN_CANCEL:
-        await state.clear()
-        await message.answer("Cancelled.", reply_markup=main_menu_keyboard())
+        await _back_to_lists(message, container, state)
         return
     data = await state.get_data()
-    await state.clear()
     result = await container.bus.execute(
         AddDomainListCommand(name=data["name"], type="url", url=(message.text or "").strip())
     )
     if not result.ok:
-        await message.answer(f"Error: {result.error}", reply_markup=main_menu_keyboard())
+        await state.set_state(AddListUrl.waiting_name)
+        await message.answer(f"Error: {result.error}\nList name:", reply_markup=cancel_keyboard())
         return
-    await message.answer(result.message or "Added.", reply_markup=main_menu_keyboard())
+    await state.set_state(AddListUrl.waiting_name)
+    await message.answer(
+        f"{result.message or 'Added.'}\nЕщё list name или ◀ Отмена:",
+        reply_markup=cancel_keyboard(),
+    )
 
 
 @router.callback_query(F.data == "l:upload")
@@ -232,10 +241,9 @@ async def cb_upload(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(AddListFile.waiting_name, F.text)
-async def upload_cancel_or_name(message: Message, state: FSMContext) -> None:
+async def upload_cancel_or_name(message: Message, container: AppContainer, state: FSMContext) -> None:
     if message.text == BTN_CANCEL:
-        await state.clear()
-        await message.answer("Cancelled.", reply_markup=main_menu_keyboard())
+        await _back_to_lists(message, container, state)
 
 
 @router.message(AddListFile.waiting_name, F.document)
@@ -246,14 +254,16 @@ async def upload_file(message: Message, container: AppContainer, state: FSMConte
     content = file.read().decode("utf-8", errors="replace")
     name = message.document.file_name or "upload"
     list_name = name.rsplit(".", 1)[0]
-    await state.clear()
     result = await container.bus.execute(
         AddDomainListCommand(name=list_name, type="file", file_content=content)
     )
     if not result.ok:
-        await message.answer(f"Error: {result.error}", reply_markup=main_menu_keyboard())
+        await message.answer(f"Error: {result.error}", reply_markup=cancel_keyboard())
         return
-    await message.answer(result.message or "Uploaded.", reply_markup=main_menu_keyboard())
+    await message.answer(
+        f"{result.message or 'Uploaded.'}\nЕщё файл или ◀ Отмена:",
+        reply_markup=cancel_keyboard(),
+    )
 
 
 @router.callback_query(F.data.startswith("l:int:"))
@@ -269,20 +279,21 @@ async def cb_interval(callback: CallbackQuery, state: FSMContext) -> None:
 @router.message(SetListInterval.waiting_seconds, F.text)
 async def set_list_interval(message: Message, container: AppContainer, state: FSMContext) -> None:
     if message.text == BTN_CANCEL:
-        await state.clear()
-        await message.answer("Cancelled.", reply_markup=main_menu_keyboard())
+        await _back_to_lists(message, container, state)
         return
     try:
         seconds = int((message.text or "").strip())
     except ValueError:
-        await message.answer("Enter a number.")
+        await message.answer("Enter a number.", reply_markup=cancel_keyboard())
         return
     data = await state.get_data()
-    await state.clear()
     result = await container.bus.execute(
         UpdateDomainListCommand(id=int(data["list_id"]), sync_interval=seconds)
     )
     if not result.ok:
-        await message.answer(f"Error: {result.error}", reply_markup=main_menu_keyboard())
+        await message.answer(f"Error: {result.error}", reply_markup=cancel_keyboard())
         return
-    await message.answer(result.message or "Updated.", reply_markup=main_menu_keyboard())
+    await message.answer(
+        f"{result.message or 'Updated.'}\nЕщё interval или ◀ Отмена:",
+        reply_markup=cancel_keyboard(),
+    )

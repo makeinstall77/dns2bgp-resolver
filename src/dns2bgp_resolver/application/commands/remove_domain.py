@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from dns2bgp_resolver.application.commands.dto import CommandResult
 from dns2bgp_resolver.application.ports.repository import DomainRepository
-from dns2bgp_resolver.domain import parse_domain_input
+from dns2bgp_resolver.domain import format_domain_label, parse_domain_input
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,4 +31,7 @@ class RemoveDomainHandler:
         removed = await self._repository.remove(name)
         if not removed:
             return CommandResult.failure(f"domain not found: {name}")
-        return CommandResult.success(str(name), message=f"removed {name}")
+        return CommandResult.success(
+            str(name),
+            message=f"removed {format_domain_label(str(name), existing.match_mode)}",
+        )

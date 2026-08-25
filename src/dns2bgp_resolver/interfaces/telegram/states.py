@@ -9,6 +9,14 @@ class RemoveDomain(StatesGroup):
     waiting_name = State()
 
 
+class AddPrefix(StatesGroup):
+    waiting_cidr = State()
+
+
+class RemovePrefix(StatesGroup):
+    waiting_cidr = State()
+
+
 class SearchAuto(StatesGroup):
     waiting_query = State()
 

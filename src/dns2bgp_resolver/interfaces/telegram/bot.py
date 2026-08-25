@@ -9,19 +9,36 @@ from aiogram.types import Message, TelegramObject
 
 from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
-from dns2bgp_resolver.interfaces.telegram.handlers import auto, import_file, lists, manual, menu, settings
+from dns2bgp_resolver.interfaces.telegram.handlers import (
+    auto,
+    import_file,
+    lists,
+    manual,
+    menu,
+    prefixes,
+    settings,
+)
 from dns2bgp_resolver.interfaces.telegram.keyboards import (
     BTN_AUTO,
     BTN_CANCEL,
     BTN_DOMAINS,
     BTN_LISTS,
+    BTN_PREFIXES,
     BTN_RESOLVE,
     BTN_SETTINGS,
     main_menu_keyboard,
 )
 from dns2bgp_resolver.interfaces.telegram.sync_alert import TelegramSyncAlertNotifier
 
-_MENU_BUTTONS = {BTN_DOMAINS, BTN_AUTO, BTN_LISTS, BTN_SETTINGS, BTN_RESOLVE, BTN_CANCEL}
+_MENU_BUTTONS = {
+    BTN_DOMAINS,
+    BTN_AUTO,
+    BTN_PREFIXES,
+    BTN_LISTS,
+    BTN_SETTINGS,
+    BTN_RESOLVE,
+    BTN_CANCEL,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +72,7 @@ async def run_telegram_bot(container: AppContainer) -> None:
     dp.include_router(menu.router)
     dp.include_router(manual.router)
     dp.include_router(auto.router)
+    dp.include_router(prefixes.router)
     dp.include_router(lists.router)
     dp.include_router(settings.router)
     dp.include_router(import_file.router)

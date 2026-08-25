@@ -71,21 +71,25 @@ async def _read_frame(reader: asyncio.StreamReader) -> tuple[bool, bytes]:
 
 
 async def handshake_as_receiver(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    """Bidirectional fstrm handshake: we are the collector (receiver)."""
-    writer.write(_encode_control(_CONTROL_READY, [_CONTENT_TYPE]))
+    """Bidirectional fstrm handshake: unbound connects and sends READY first."""
+    is_ctrl, body = await _read_frame(reader)
+    if not is_ctrl:
+        raise ValueError("expected READY control frame")
+    ctype, types = _decode_control(body)
+    if ctype != _CONTROL_READY:
+        raise ValueError(f"expected READY, got {ctype}")
+    if types and _CONTENT_TYPE not in types:
+        logger.warning("READY content-types=%s", types)
+
+    writer.write(_encode_control(_CONTROL_ACCEPT, [_CONTENT_TYPE]))
     await writer.drain()
 
     is_ctrl, body = await _read_frame(reader)
     if not is_ctrl:
-        raise ValueError("expected ACCEPT control frame")
-    ctype, types = _decode_control(body)
-    if ctype != _CONTROL_ACCEPT:
-        raise ValueError(f"expected ACCEPT, got {ctype}")
-    if types and _CONTENT_TYPE not in types:
-        logger.warning("ACCEPT content-types=%s", types)
-
-    writer.write(_encode_control(_CONTROL_START, [_CONTENT_TYPE]))
-    await writer.drain()
+        raise ValueError("expected START control frame")
+    ctype, _ = _decode_control(body)
+    if ctype != _CONTROL_START:
+        raise ValueError(f"expected START, got {ctype}")
 
 
 def _decode_varint(buf: bytes, i: int) -> tuple[int, int]:
