@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from dns2bgp_resolver.domain import (
@@ -18,6 +19,22 @@ class ImportParseResult:
     domains: set[str]
     prefixes: set[str]
     skipped: int
+
+
+def format_domains_export(labels: Iterable[str]) -> str:
+    lines = sorted({label.strip() for label in labels if label.strip()})
+    return ("\n".join(lines) + "\n") if lines else ""
+
+
+def format_prefixes_export(items: Iterable[tuple[str, str | None]]) -> str:
+    lines: list[str] = []
+    for cidr, name in sorted(items, key=lambda x: x[0]):
+        cidr = cidr.strip()
+        if not cidr:
+            continue
+        name = name.strip() if name else None
+        lines.append(f"{cidr} {name}" if name else cidr)
+    return ("\n".join(lines) + "\n") if lines else ""
 
 
 def _try_prefix(raw: str) -> str | None:
