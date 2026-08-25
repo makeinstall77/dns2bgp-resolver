@@ -52,6 +52,9 @@ class DomainRow(Base):
         ForeignKey("domain_lists.id", ondelete="SET NULL"), nullable=True, index=True
     )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    match_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="suffix", server_default="suffix"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -61,11 +64,38 @@ class DomainRow(Base):
     )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    addresses: Mapped[list[AddressRow]] = relationship(
+    addresses: Mapped[list["AddressRow"]] = relationship(
         "AddressRow",
         back_populates="domain",
         cascade="all, delete-orphan",
         lazy="selectin",
+    )
+
+
+class StaticPrefixRow(Base):
+    __tablename__ = "static_prefixes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    cidr: Mapped[str] = mapped_column(String(43), unique=True, nullable=False, index=True)
+    name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class PassiveHitRow(Base):
+    __tablename__ = "passive_hits"
+    __table_args__ = (UniqueConstraint("ip", name="uq_passive_ip"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ip: Mapped[str] = mapped_column(String(45), nullable=False, index=True)
+    matched_name: Mapped[str] = mapped_column(String(253), nullable=False, index=True)
+    first_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 

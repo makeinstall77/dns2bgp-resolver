@@ -20,7 +20,15 @@ from dns2bgp_resolver.application.ports.repository import (
     SyncPendingConfirmation,
     SyncPreview,
 )
-from dns2bgp_resolver.domain import Domain, DomainList, DomainName, IpAddress, ResolvedAddress
+from dns2bgp_resolver.domain import (
+    Domain,
+    DomainList,
+    DomainName,
+    IpAddress,
+    PassiveHit,
+    ResolvedAddress,
+    StaticPrefix,
+)
 from dns2bgp_resolver.infrastructure.db.models import (
     AddressRow,
     AppSettingRow,
@@ -28,6 +36,8 @@ from dns2bgp_resolver.infrastructure.db.models import (
     Base,
     DomainListRow,
     DomainRow,
+    PassiveHitRow,
+    StaticPrefixRow,
     SyncPendingConfirmationRow,
 )
 
@@ -52,6 +62,7 @@ def _row_to_domain(row: DomainRow) -> Domain:
         source=row.source,  # type: ignore[arg-type]
         list_id=row.list_id,
         enabled=row.enabled,
+        match_mode=getattr(row, "match_mode", None) or "suffix",  # type: ignore[arg-type]
         created_at=_ensure_aware(row.created_at),
         next_resolve_at=_ensure_aware(row.next_resolve_at),
         last_resolved_at=_ensure_aware(row.last_resolved_at),
@@ -59,6 +70,16 @@ def _row_to_domain(row: DomainRow) -> Domain:
         addresses=[
             ResolvedAddress(ip=IpAddress(a.ip), ttl_seconds=a.ttl_seconds) for a in row.addresses
         ],
+    )
+
+
+def _row_to_static_prefix(row: StaticPrefixRow) -> StaticPrefix:
+    return StaticPrefix(
+        id=row.id,
+        cidr=row.cidr,
+        name=row.name,
+        enabled=row.enabled,
+        created_at=_ensure_aware(row.created_at),
     )
 
 
@@ -134,6 +155,13 @@ class SqlAlchemyDomainRepository(DomainRepository):
                     await conn.execute(
                         text("CREATE INDEX IF NOT EXISTS ix_domains_list_id ON domains (list_id)")
                     )
+                if "match_mode" not in columns:
+                    await conn.execute(
+                        text(
+                            "ALTER TABLE domains ADD COLUMN match_mode VARCHAR(16) "
+                            "NOT NULL DEFAULT 'suffix'"
+                        )
+                    )
                 await self._configure_sqlite(conn)
             elif conn.dialect.name == "postgresql":
                 result = await conn.execute(
@@ -157,6 +185,19 @@ class SqlAlchemyDomainRepository(DomainRepository):
                 )
                 if result.fetchone() is None:
                     await conn.execute(text("ALTER TABLE domains ADD COLUMN list_id INTEGER"))
+                result = await conn.execute(
+                    text(
+                        "SELECT 1 FROM information_schema.columns "
+                        "WHERE table_name = 'domains' AND column_name = 'match_mode'"
+                    )
+                )
+                if result.fetchone() is None:
+                    await conn.execute(
+                        text(
+                            "ALTER TABLE domains ADD COLUMN match_mode VARCHAR(16) "
+                            "NOT NULL DEFAULT 'suffix'"
+                        )
+                    )
 
     async def close(self) -> None:
         await self._engine.dispose()
@@ -167,6 +208,7 @@ class SqlAlchemyDomainRepository(DomainRepository):
             source=domain.source,
             list_id=domain.list_id,
             enabled=domain.enabled,
+            match_mode=domain.match_mode,
         )
         async with self._session_factory() as session:
             session.add(row)
@@ -289,8 +331,8 @@ class SqlAlchemyDomainRepository(DomainRepository):
 
                 add_result = await conn.execute(
                     text(
-                        "INSERT INTO domains (name, source, list_id, enabled) "
-                        "SELECT t.name, 'auto', :list_id, 1 FROM sync_target t "
+                        "INSERT INTO domains (name, source, list_id, enabled, match_mode) "
+                        "SELECT t.name, 'auto', :list_id, 1, 'suffix' FROM sync_target t "
                         "WHERE NOT EXISTS (SELECT 1 FROM domains d WHERE d.name = t.name)"
                     ),
                     {"list_id": list_id},
@@ -343,8 +385,8 @@ class SqlAlchemyDomainRepository(DomainRepository):
 
                 add_result = await conn.execute(
                     text(
-                        "INSERT INTO domains (name, source, enabled) "
-                        "SELECT t.name, 'auto', 1 FROM sync_target t "
+                        "INSERT INTO domains (name, source, enabled, match_mode) "
+                        "SELECT t.name, 'auto', 1, 'suffix' FROM sync_target t "
                         "WHERE NOT EXISTS (SELECT 1 FROM domains d WHERE d.name = t.name)"
                     )
                 )
@@ -641,6 +683,7 @@ class SqlAlchemyDomainRepository(DomainRepository):
             result = await session.execute(
                 select(DomainRow)
                 .where(DomainRow.enabled.is_(True))
+                .where(DomainRow.source == "manual")
                 .where(
                     (DomainRow.next_resolve_at.is_(None)) | (DomainRow.next_resolve_at <= now)
                 )
@@ -648,6 +691,13 @@ class SqlAlchemyDomainRepository(DomainRepository):
             )
             rows = result.scalars().all()
             return [_row_to_domain(r) for r in rows]
+
+    async def list_index_names(self) -> list[str]:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(DomainRow.name).where(DomainRow.enabled.is_(True))
+            )
+            return list(result.scalars().all())
 
     async def replace_addresses(
         self,
@@ -711,9 +761,88 @@ class SqlAlchemyDomainRepository(DomainRepository):
                 select(AddressRow.ip)
                 .join(DomainRow)
                 .where(DomainRow.enabled.is_(True))
+                .where(DomainRow.source == "manual")
                 .where(AddressRow.family == 4)
             )
             return list(result.scalars().all())
+
+    async def add_static_prefix(self, prefix: StaticPrefix) -> StaticPrefix:
+        row = StaticPrefixRow(cidr=prefix.cidr, name=prefix.name, enabled=prefix.enabled)
+        async with self._session_factory() as session:
+            session.add(row)
+            try:
+                await session.commit()
+            except IntegrityError as exc:
+                await session.rollback()
+                raise DomainAlreadyExistsError(prefix.cidr) from exc
+            await session.refresh(row)
+            return _row_to_static_prefix(row)
+
+    async def remove_static_prefix(self, cidr: str) -> bool:
+        from ipaddress import ip_network
+
+        normalized = str(ip_network(cidr, strict=False))
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(StaticPrefixRow).where(StaticPrefixRow.cidr == normalized)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                return False
+            await session.delete(row)
+            await session.commit()
+            return True
+
+    async def list_static_prefixes(self) -> list[StaticPrefix]:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(StaticPrefixRow).order_by(StaticPrefixRow.cidr)
+            )
+            return [_row_to_static_prefix(r) for r in result.scalars().all()]
+
+    async def upsert_passive_hit(
+        self, ip: str, matched_name: str, *, seen_at: datetime
+    ) -> bool:
+        async with self._session_factory() as session:
+            result = await session.execute(select(PassiveHitRow).where(PassiveHitRow.ip == ip))
+            row = result.scalar_one_or_none()
+            if row is None:
+                session.add(
+                    PassiveHitRow(
+                        ip=ip,
+                        matched_name=matched_name,
+                        first_seen=seen_at,
+                        last_seen=seen_at,
+                    )
+                )
+                await session.commit()
+                return True
+            row.matched_name = matched_name
+            row.last_seen = seen_at
+            await session.commit()
+            return False
+
+    async def list_passive_ips(self) -> list[str]:
+        async with self._session_factory() as session:
+            result = await session.execute(select(PassiveHitRow.ip))
+            return list(result.scalars().all())
+
+    async def list_passive_hits(self, *, limit: int = 100) -> list[PassiveHit]:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(PassiveHitRow)
+                .order_by(PassiveHitRow.last_seen.desc())
+                .limit(limit)
+            )
+            return [
+                PassiveHit(
+                    ip=r.ip,
+                    matched_name=r.matched_name,
+                    first_seen=_ensure_aware(r.first_seen),
+                    last_seen=_ensure_aware(r.last_seen),
+                )
+                for r in result.scalars().all()
+            ]
 
 
 # Alias for clarity in composition root

@@ -12,14 +12,17 @@ from dns2bgp_resolver.application.commands import (
     AddDomainCommand,
     AddDomainListCommand,
     AddExcludeKeywordCommand,
+    AddPrefixCommand,
     ClearDomainListCommand,
     GetSettingsCommand,
     ListDomainListsCommand,
     ListDomainsCommand,
     ListExcludeKeywordsCommand,
+    ListPrefixesCommand,
     RemoveDomainCommand,
     RemoveDomainListCommand,
     RemoveExcludeKeywordCommand,
+    RemovePrefixCommand,
     ResolveNowCommand,
     SearchAutoDomainsCommand,
     SetDefaultSyncIntervalCommand,
@@ -35,6 +38,11 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 class DomainCreate(BaseModel):
     name: str = Field(min_length=1, max_length=253)
+
+
+class PrefixCreate(BaseModel):
+    cidr: str = Field(min_length=1, max_length=43)
+    name: str | None = None
 
 
 class KeywordCreate(BaseModel):
@@ -462,5 +470,35 @@ def create_app(container: AppContainer) -> FastAPI:
         if not result.ok:
             raise HTTPException(status_code=400, detail=result.error)
         return [s.__dict__ for s in (result.data or [])]
+
+    @app.get("/api/prefixes")
+    async def api_list_prefixes(_: Auth):
+        result = await container.bus.execute(ListPrefixesCommand())
+        if not result.ok:
+            raise HTTPException(status_code=500, detail=result.error)
+        return [p.__dict__ for p in (result.data or [])]
+
+    @app.post("/api/prefixes", status_code=201)
+    async def api_add_prefix(body: PrefixCreate, _: Auth):
+        result = await container.bus.execute(AddPrefixCommand(cidr=body.cidr, name=body.name))
+        if not result.ok:
+            raise HTTPException(status_code=400, detail=result.error)
+        return result.data.__dict__ if result.data else {}
+
+    @app.delete("/api/prefixes/{cidr:path}")
+    async def api_remove_prefix(cidr: str, _: Auth):
+        result = await container.bus.execute(RemovePrefixCommand(cidr=cidr))
+        if not result.ok:
+            raise HTTPException(status_code=404, detail=result.error)
+        return {"removed": cidr}
+
+    @app.get("/api/index/stats")
+    async def api_index_stats(_: Auth):
+        return {
+            "index_size": container.domain_index.size,
+            "passive_hits": container.passive_collector.stats[1],
+            "dnstap_seen": container.passive_collector.stats[0],
+            "dnstap_enabled": container.dnstap_server is not None,
+        }
 
     return app

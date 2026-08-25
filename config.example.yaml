@@ -38,3 +38,13 @@ auto_list:
   exclude_keywords: []
   max_removal_ratio: 0.5
   confirm_ttl_seconds: 3600
+
+# Unbound sidecar: enable dnstap and point unbound at this socket.
+# unbound.conf:
+#   dnstap-enable: yes
+#   dnstap-socket-path: "/path/to/dnstap.sock"
+#   dnstap-send-client-response: yes
+dnstap:
+  enabled: false
+  listen_unix: "./data/dnstap.sock"
+  socket_mode: 438
