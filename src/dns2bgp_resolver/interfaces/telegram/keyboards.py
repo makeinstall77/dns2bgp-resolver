@@ -7,6 +7,7 @@ BTN_AUTO = "🤖 Auto"
 BTN_PREFIXES = "🛣 Prefixes"
 BTN_LISTS = "📂 Списки"
 BTN_SETTINGS = "⚙️ Настройки"
+BTN_STATUS = "📊 Статус"
 BTN_RESOLVE = "🔄 Resolve manual"
 BTN_CANCEL = "◀ Отмена"
 
@@ -16,7 +17,8 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=BTN_DOMAINS), KeyboardButton(text=BTN_AUTO)],
             [KeyboardButton(text=BTN_PREFIXES), KeyboardButton(text=BTN_LISTS)],
-            [KeyboardButton(text=BTN_SETTINGS), KeyboardButton(text=BTN_RESOLVE)],
+            [KeyboardButton(text=BTN_SETTINGS), KeyboardButton(text=BTN_STATUS)],
+            [KeyboardButton(text=BTN_RESOLVE)],
         ],
         resize_keyboard=True,
     )

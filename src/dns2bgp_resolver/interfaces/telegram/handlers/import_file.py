@@ -13,6 +13,7 @@ from dns2bgp_resolver.application.services.list_parse import parse_import_lines
 from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
 from dns2bgp_resolver.interfaces.telegram.keyboards import confirm_import_menu, main_menu_keyboard
+from dns2bgp_resolver.interfaces.telegram.ui import BotUi
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ def _looks_like_binary(raw: bytes) -> bool:
 
 
 @router.message(StateFilter(None), F.document)
-async def on_document(message: Message, container: AppContainer) -> None:
+async def on_document(message: Message, container: AppContainer, ui: BotUi) -> None:
     if not allowed(container, message.from_user.id if message.from_user else None):
         return
     if message.document is None or message.bot is None:
@@ -62,18 +63,20 @@ async def on_document(message: Message, container: AppContainer) -> None:
 
     size = message.document.file_size or 0
     if size > _MAX_FILE_BYTES:
-        await message.answer(
+        await ui.reply(
+            message,
             f"Файл слишком большой (макс. {_MAX_FILE_BYTES // (1024 * 1024)} МБ).",
-            reply_markup=main_menu_keyboard(),
+            reply_keyboard=main_menu_keyboard(),
         )
         return
 
     file = await message.bot.download(message.document)
     raw = file.read()
     if _looks_like_binary(raw):
-        await message.answer(
+        await ui.reply(
+            message,
             "Не похоже на текстовый список доменов/префиксов.",
-            reply_markup=main_menu_keyboard(),
+            reply_keyboard=main_menu_keyboard(),
         )
         return
 
@@ -82,18 +85,20 @@ async def on_document(message: Message, container: AppContainer) -> None:
     domains = sorted(parsed.domains)
     prefixes = sorted(parsed.prefixes)
     if not domains and not prefixes:
-        await message.answer(
+        await ui.reply(
+            message,
             "Не удалось найти домены или префиксы "
             "(один домен/CIDR/IP на строку, # — комментарий).",
-            reply_markup=main_menu_keyboard(),
+            reply_keyboard=main_menu_keyboard(),
         )
         return
 
     total = len(domains) + len(prefixes)
     if total > _MAX_ITEMS:
-        await message.answer(
+        await ui.reply(
+            message,
             f"Слишком много записей: {total} (макс. {_MAX_ITEMS}).",
-            reply_markup=main_menu_keyboard(),
+            reply_keyboard=main_menu_keyboard(),
         )
         return
 
@@ -122,11 +127,11 @@ async def on_document(message: Message, container: AppContainer) -> None:
     if prefixes:
         dest.append("static prefixes → bird")
     lines.append("\nИмпортировать в " + " и ".join(dest) + "?")
-    await message.answer("\n".join(lines), reply_markup=confirm_import_menu(token))
+    await ui.reply(message, "\n".join(lines), reply_markup=confirm_import_menu(token))
 
 
 @router.callback_query(F.data.startswith("mi:ok:"))
-async def cb_import_ok(callback: CallbackQuery, container: AppContainer) -> None:
+async def cb_import_ok(callback: CallbackQuery, container: AppContainer, ui: BotUi) -> None:
     if not allowed(container, callback.from_user.id if callback.from_user else None):
         await callback.answer("Access denied.", show_alert=True)
         return
@@ -139,7 +144,7 @@ async def cb_import_ok(callback: CallbackQuery, container: AppContainer) -> None
     await callback.answer()
     total = len(pending.domains) + len(pending.prefixes)
     if callback.message:
-        await callback.message.edit_text(f"⏳ Импорт {total} запис(ей)…")
+        await ui.edit(callback.message, f"⏳ Импорт {total} запис(ей)…")
 
     d_added = d_exists = d_errors = 0
     for name in pending.domains:
@@ -172,18 +177,20 @@ async def cb_import_ok(callback: CallbackQuery, container: AppContainer) -> None
         parts.append(
             f"Префиксы — добавлено: {p_added}, уже были: {p_exists}, ошибки: {p_errors}"
         )
-    if callback.message:
-        await callback.message.edit_text("\n".join(parts))
-        await callback.message.answer("Готово.", reply_markup=main_menu_keyboard())
+    if callback.message and callback.message.bot is not None:
+        await ui.edit(callback.message, "\n".join(parts) + "\n\nГотово.")
+        await ui.apply_reply_keyboard(
+            callback.message.bot, callback.message.chat.id, main_menu_keyboard()
+        )
 
 
 @router.callback_query(F.data.startswith("mi:no:"))
-async def cb_import_cancel(callback: CallbackQuery, container: AppContainer) -> None:
+async def cb_import_cancel(callback: CallbackQuery, container: AppContainer, ui: BotUi) -> None:
     if not allowed(container, callback.from_user.id if callback.from_user else None):
         await callback.answer("Access denied.", show_alert=True)
         return
     token = (callback.data or "").split(":", 2)[-1]
     _pop_pending(token)
     if callback.message:
-        await callback.message.edit_text("Импорт отменён.")
+        await ui.edit(callback.message, "Импорт отменён.")
     await callback.answer("Отменено.")
