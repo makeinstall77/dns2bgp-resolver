@@ -42,8 +42,9 @@ auto_list:
 # Unbound sidecar: enable dnstap and point unbound at this socket.
 # unbound.conf:
 #   dnstap-enable: yes
+#   dnstap-bidirectional: yes
 #   dnstap-socket-path: "/path/to/dnstap.sock"
-#   dnstap-send-client-response: yes
+#   dnstap-log-client-response-messages: yes
 dnstap:
   enabled: false
   listen_unix: "./data/dnstap.sock"
