@@ -6,6 +6,16 @@ from dns2bgp_resolver.interfaces.telegram.handlers import (
     menu,
     prefixes,
     settings,
+    status,
 )
 
-__all__ = ["auto", "import_file", "lists", "manual", "menu", "prefixes", "settings"]
+__all__ = [
+    "auto",
+    "import_file",
+    "lists",
+    "manual",
+    "menu",
+    "prefixes",
+    "settings",
+    "status",
+]

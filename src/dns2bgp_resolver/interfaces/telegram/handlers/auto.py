@@ -24,6 +24,7 @@ from dns2bgp_resolver.interfaces.telegram.keyboards import (
     main_menu_keyboard,
 )
 from dns2bgp_resolver.interfaces.telegram.states import AddFilter, SearchAuto
+from dns2bgp_resolver.interfaces.telegram.ui import BotUi
 
 router = Router()
 
@@ -88,7 +89,7 @@ async def _render_auto_page(
 
 
 @router.callback_query(F.data.startswith("a:list:"))
-async def cb_list(callback: CallbackQuery, container: AppContainer) -> None:
+async def cb_list(callback: CallbackQuery, container: AppContainer, ui: BotUi) -> None:
     if not allowed(container, callback.from_user.id if callback.from_user else None):
         await callback.answer("Access denied.", show_alert=True)
         return
@@ -105,17 +106,16 @@ async def cb_list(callback: CallbackQuery, container: AppContainer) -> None:
         with_query_key=False,
     )
     if callback.message:
-        await callback.message.edit_text(text, reply_markup=markup)
+        await ui.edit(callback.message, text, reply_markup=markup)
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("a:h:"))
-async def cb_host(callback: CallbackQuery, container: AppContainer) -> None:
+async def cb_host(callback: CallbackQuery, container: AppContainer, ui: BotUi) -> None:
     if not allowed(container, callback.from_user.id if callback.from_user else None):
         await callback.answer("Access denied.", show_alert=True)
         return
     parts = (callback.data or "").split(":")
-    # a:h:id:page or a:h:id:page:query_key
     if len(parts) < 4:
         await callback.answer("Invalid callback.")
         return
@@ -149,7 +149,8 @@ async def cb_host(callback: CallbackQuery, container: AppContainer) -> None:
             f"passive IP: пока нет (ждём DNS-запросы)"
         )
     if callback.message:
-        await callback.message.edit_text(
+        await ui.edit(
+            callback.message,
             text,
             reply_markup=auto_host_menu(domain_id, page, query_key=query_key),
         )
@@ -157,26 +158,33 @@ async def cb_host(callback: CallbackQuery, container: AppContainer) -> None:
 
 
 @router.callback_query(F.data == "a:search")
-async def cb_search(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_search(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
     await state.set_state(SearchAuto.waiting_query)
     if callback.message:
-        await callback.message.answer("Enter search query:", reply_markup=cancel_keyboard())
+        await ui.reply(
+            callback.message,
+            "Enter search query:",
+            reply_markup=cancel_keyboard(),
+        )
     await callback.answer()
 
 
-async def _back_to_auto(message: Message, state: FSMContext) -> None:
+async def _back_to_auto(message: Message, state: FSMContext, ui: BotUi) -> None:
     await state.clear()
-    await message.answer(
+    await ui.reply(
+        message,
         "Auto domains — только индекс.\nIP появляются по DNS-запросам (dnstap), без pre-resolve.",
-        reply_markup=main_menu_keyboard(),
+        reply_markup=auto_menu(),
+        reply_keyboard=main_menu_keyboard(),
     )
-    await message.answer("Выберите действие:", reply_markup=auto_menu())
 
 
 @router.message(SearchAuto.waiting_query, F.text)
-async def search_query(message: Message, container: AppContainer, state: FSMContext) -> None:
+async def search_query(
+    message: Message, container: AppContainer, state: FSMContext, ui: BotUi
+) -> None:
     if message.text == BTN_CANCEL:
-        await _back_to_auto(message, state)
+        await _back_to_auto(message, state, ui)
         return
     query = (message.text or "").strip()
     text, markup = await _render_auto_page(
@@ -187,12 +195,11 @@ async def search_query(message: Message, container: AppContainer, state: FSMCont
         back_callback="m:auto",
         with_query_key=True,
     )
-    await message.answer(text, reply_markup=markup)
-    await message.answer("Ещё запрос или ◀ Отмена:", reply_markup=cancel_keyboard())
+    await ui.reply(message, text, reply_markup=markup, reply_keyboard=cancel_keyboard())
 
 
 @router.callback_query(F.data.startswith("s:"))
-async def cb_search_page(callback: CallbackQuery, container: AppContainer) -> None:
+async def cb_search_page(callback: CallbackQuery, container: AppContainer, ui: BotUi) -> None:
     if not allowed(container, callback.from_user.id if callback.from_user else None):
         await callback.answer("Access denied.", show_alert=True)
         return
@@ -215,61 +222,68 @@ async def cb_search_page(callback: CallbackQuery, container: AppContainer) -> No
         with_query_key=True,
     )
     if callback.message:
-        await callback.message.edit_text(text, reply_markup=markup)
+        await ui.edit(callback.message, text, reply_markup=markup)
     await callback.answer()
 
 
 @router.callback_query(F.data == "a:filters")
-async def cb_filters(callback: CallbackQuery, container: AppContainer) -> None:
+async def cb_filters(callback: CallbackQuery, container: AppContainer, ui: BotUi) -> None:
     result = await container.bus.execute(ListExcludeKeywordsCommand())
     keywords = result.data or []
     text = "🏷 Exclude keywords:" if keywords else "🏷 No exclude keywords."
     if callback.message:
-        await callback.message.edit_text(text, reply_markup=filters_menu(keywords))
+        await ui.edit(callback.message, text, reply_markup=filters_menu(keywords))
     await callback.answer()
 
 
 @router.callback_query(F.data == "f:add")
-async def cb_filter_add(callback: CallbackQuery, state: FSMContext) -> None:
+async def cb_filter_add(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
     await state.set_state(AddFilter.waiting_keyword)
     if callback.message:
-        await callback.message.answer("Enter keyword:", reply_markup=cancel_keyboard())
+        await ui.reply(callback.message, "Enter keyword:", reply_markup=cancel_keyboard())
     await callback.answer()
 
 
-async def _back_to_filters(message: Message, container: AppContainer, state: FSMContext) -> None:
+async def _back_to_filters(
+    message: Message, container: AppContainer, state: FSMContext, ui: BotUi
+) -> None:
     await state.clear()
     result = await container.bus.execute(ListExcludeKeywordsCommand())
     keywords = result.data or []
     text = "🏷 Exclude keywords:" if keywords else "🏷 No exclude keywords."
-    await message.answer(text, reply_markup=main_menu_keyboard())
-    await message.answer("Фильтры:", reply_markup=filters_menu(keywords))
+    await ui.reply(
+        message, text, reply_markup=filters_menu(keywords), reply_keyboard=main_menu_keyboard()
+    )
 
 
 @router.message(AddFilter.waiting_keyword, F.text)
-async def filter_add_text(message: Message, container: AppContainer, state: FSMContext) -> None:
+async def filter_add_text(
+    message: Message, container: AppContainer, state: FSMContext, ui: BotUi
+) -> None:
     if message.text == BTN_CANCEL:
-        await _back_to_filters(message, container, state)
+        await _back_to_filters(message, container, state, ui)
         return
     result = await container.bus.execute(AddExcludeKeywordCommand(keyword=(message.text or "").strip()))
     if not result.ok:
-        await message.answer(f"Error: {result.error}", reply_markup=cancel_keyboard())
+        await ui.reply(message, f"Error: {result.error}", reply_markup=cancel_keyboard())
         return
-    await message.answer(
+    await ui.reply(
+        message,
         f"{result.message or 'Added.'}\nЕщё keyword или ◀ Отмена:",
         reply_markup=cancel_keyboard(),
     )
 
 
 @router.callback_query(F.data.startswith("f:rm:"))
-async def cb_filter_remove(callback: CallbackQuery, container: AppContainer) -> None:
+async def cb_filter_remove(callback: CallbackQuery, container: AppContainer, ui: BotUi) -> None:
     keyword = (callback.data or "").split(":", 2)[-1]
     result = await container.bus.execute(RemoveExcludeKeywordCommand(keyword=keyword))
     keywords_result = await container.bus.execute(ListExcludeKeywordsCommand())
     keywords = keywords_result.data or []
     text = "🏷 Exclude keywords:" if keywords else "🏷 No exclude keywords."
     if callback.message:
-        await callback.message.edit_text(
+        await ui.edit(
+            callback.message,
             result.message or text,
             reply_markup=filters_menu(keywords),
         )

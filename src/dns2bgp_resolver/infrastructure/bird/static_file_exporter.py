@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -10,6 +11,9 @@ from dns2bgp_resolver.application.ports.route_exporter import RouteExporter
 from dns2bgp_resolver.config import BirdSettings
 
 logger = logging.getLogger(__name__)
+
+_ROUTE_LINE = re.compile(r"^\s*route\s+\S+")
+_COUNT_RE = re.compile(r"(\d+)\s+of\s+(\d+)|Total:\s*(\d+)|^(\d+)\s*$", re.I | re.M)
 
 
 def _looks_like_ip(value: str) -> bool:
@@ -20,6 +24,54 @@ def _looks_like_ip(value: str) -> bool:
         return all(0 <= int(p) <= 255 for p in parts)
     except ValueError:
         return False
+
+
+def count_routes_in_file(path: str | Path) -> int | None:
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return None
+    return sum(1 for line in text.splitlines() if _ROUTE_LINE.match(line))
+
+
+def _parse_bird_count(output: str) -> int | None:
+    matches = list(_COUNT_RE.finditer(output))
+    if not matches:
+        # Fallback: count route lines in show route output
+        n = sum(1 for line in output.splitlines() if _ROUTE_LINE.match(line) or "/" in line and "unicast" in line.lower())
+        return n if n else None
+    last = matches[-1]
+    for g in last.groups():
+        if g is not None:
+            return int(g)
+    return None
+
+
+async def query_bird_route_count(settings: BirdSettings) -> int | None:
+    cmd = [settings.birdc_bin]
+    if settings.birdc_socket:
+        cmd.extend(["-s", settings.birdc_socket])
+    cmd.extend(["show", "route", "protocol", settings.protocol_name, "count"])
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            logger.debug(
+                "birdc route count failed: %s %s",
+                stdout.decode(errors="replace"),
+                stderr.decode(errors="replace"),
+            )
+            return None
+        return _parse_bird_count(stdout.decode(errors="replace"))
+    except FileNotFoundError:
+        return None
+    except Exception:  # noqa: BLE001
+        logger.debug("birdc route count error", exc_info=True)
+        return None
 
 
 class StaticFileBirdExporter(RouteExporter):
