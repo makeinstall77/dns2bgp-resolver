@@ -45,6 +45,7 @@ def domains_menu() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="➕ Add", callback_data="d:add"),
                 InlineKeyboardButton(text="🗑 Remove", callback_data="d:rm"),
             ],
+            [InlineKeyboardButton(text="📥 Export", callback_data="d:export")],
             [InlineKeyboardButton(text="◀ Назад", callback_data="m:main")],
         ]
     )
@@ -71,6 +72,7 @@ def prefixes_menu() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="➕ Add", callback_data="p:add"),
                 InlineKeyboardButton(text="🗑 Remove", callback_data="p:rm"),
             ],
+            [InlineKeyboardButton(text="📥 Export", callback_data="p:export")],
             [InlineKeyboardButton(text="◀ Назад", callback_data="m:main")],
         ]
     )
