@@ -118,6 +118,7 @@ class BotUi:
         except TelegramBadRequest as exc:
             if "message is not modified" in str(exc).lower():
                 self.remember(message.chat.id, message.message_id)
+                self.bump(message.chat.id)
                 return message
             if message.bot is None:
                 raise
@@ -130,6 +131,7 @@ class BotUi:
             )
         msg = edited if isinstance(edited, Message) else message
         self.remember(msg.chat.id, msg.message_id)
+        self.bump(msg.chat.id)
         return msg
 
     async def edit_by_id(
@@ -140,8 +142,13 @@ class BotUi:
         text: str,
         *,
         reply_markup: InlineKeyboardMarkup | None = None,
+        if_generation: int | None = None,
         **kwargs: Any,
     ) -> bool:
+        if if_generation is not None and self.generation(chat_id) != if_generation:
+            return False
+        if self.screen_id(chat_id) not in (None, message_id):
+            return False
         try:
             await bot.edit_message_text(
                 text,
@@ -150,6 +157,8 @@ class BotUi:
                 reply_markup=reply_markup,
                 **kwargs,
             )
+            if if_generation is not None and self.generation(chat_id) != if_generation:
+                return False
             self.remember(chat_id, message_id)
             return True
         except TelegramBadRequest as exc:
