@@ -94,6 +94,7 @@ async def cb_prefixes(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> 
         await ui.edit(
             callback.message,
             "Static prefixes (IP/CIDR) — сразу в bird, без DNS.\n"
+            "Суммаризация: /32, 2+ IP в /24 → /24, соседние сливаются.\n"
             "Можно прислать .txt со списком CIDR/IP.",
             reply_markup=prefixes_menu(),
         )

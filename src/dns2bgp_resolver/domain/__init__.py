@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
+from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
-from ipaddress import IPv4Address, IPv4Network, ip_address, ip_network
+from ipaddress import IPv4Address, IPv4Network, collapse_addresses, ip_address, ip_network
 from typing import Literal, Self
 
 DomainSource = Literal["manual", "auto"]
@@ -75,6 +77,52 @@ class IpAddress:
 
 def ip_to_prefix24(ip: str) -> str:
     return str(IPv4Network(f"{ip}/24", strict=False))
+
+
+def ip_to_prefix32(ip: str) -> str:
+    return str(IPv4Network(f"{IPv4Address(ip)}/32"))
+
+
+def _drop_covered(networks: list[IPv4Network]) -> list[IPv4Network]:
+    """Keep broader prefixes; drop those fully contained in another."""
+    kept: list[IPv4Network] = []
+    for net in sorted(set(networks), key=lambda n: (n.prefixlen, int(n.network_address))):
+        if any(net != other and net.subnet_of(other) for other in kept):
+            continue
+        kept.append(net)
+    return kept
+
+
+def summarize_prefixes(cidrs: Iterable[str]) -> list[str]:
+    """Aggregate IPv4 prefixes for BGP export.
+
+    - lone host → /32
+    - 2+ hosts in the same /24 → that /24
+    - adjacent equal-length prefixes collapse (/24+/24→/23, …)
+    - prefixes covered by a broader one are dropped
+    """
+    networks = [IPv4Network(c, strict=False) for c in cidrs]
+    networks = _drop_covered(networks)
+
+    by_24: dict[IPv4Network, list[IPv4Network]] = defaultdict(list)
+    rest: list[IPv4Network] = []
+    for net in networks:
+        if net.prefixlen == 32:
+            parent = IPv4Network(f"{net.network_address}/24", strict=False)
+            by_24[parent].append(net)
+        else:
+            rest.append(net)
+
+    promoted: list[IPv4Network] = list(rest)
+    for parent, hosts in by_24.items():
+        if any(parent == other or parent.subnet_of(other) for other in rest):
+            continue
+        if len(hosts) >= 2:
+            promoted.append(parent)
+        else:
+            promoted.extend(hosts)
+
+    return [str(n) for n in collapse_addresses(_drop_covered(promoted))]
 
 
 def is_announcable_ipv4(ip: str) -> bool:

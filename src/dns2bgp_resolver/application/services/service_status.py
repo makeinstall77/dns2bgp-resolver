@@ -11,7 +11,7 @@ from typing import Protocol
 
 from dns2bgp_resolver.application.ports.repository import DomainRepository
 from dns2bgp_resolver.config import BirdSettings, DnstapSettings
-from dns2bgp_resolver.domain import ip_to_prefix24, is_announcable_ipv4, is_announcable_prefix
+from dns2bgp_resolver.domain import ip_to_prefix32, is_announcable_ipv4, is_announcable_prefix, summarize_prefixes
 from dns2bgp_resolver.infrastructure.bird.static_file_exporter import (
     count_routes_in_file,
     query_bird_route_count,
@@ -166,17 +166,18 @@ async def collect_service_status(
     for ip in manual_ips:
         if is_announcable_ipv4(ip):
             manual_ann += 1
-            prefixes.add(ip_to_prefix24(ip))
+            prefixes.add(ip_to_prefix32(ip))
     passive_ann = 0
     for ip in passive_ips:
         if is_announcable_ipv4(ip):
             passive_ann += 1
-            prefixes.add(ip_to_prefix24(ip))
+            prefixes.add(ip_to_prefix32(ip))
     static_enabled = 0
     for item in static:
         if item.enabled and is_announcable_prefix(item.cidr):
             static_enabled += 1
             prefixes.add(item.cidr)
+    prefixes_summarized = summarize_prefixes(prefixes)
 
     bird_file = await asyncio.to_thread(count_routes_in_file, bird.include_path)
     bird_live: int | None = None
@@ -202,7 +203,7 @@ async def collect_service_status(
         exclude_keywords=len(keywords),
         pool_manual_ips=manual_ann,
         pool_passive_ips=passive_ann,
-        pool_unique_prefixes=len(prefixes),
+        pool_unique_prefixes=len(prefixes_summarized),
         bird_file_routes=bird_file,
         bird_live_routes=bird_live,
         dnstap_enabled=dnstap.enabled,
@@ -232,9 +233,9 @@ def format_status_text(status: ServiceStatus, *, live_left_sec: int | None = Non
         f"• Ожидают resolve: {status.due_resolve}",
         "",
         "BGP pool:",
-        f"• Manual IP → /24: {status.pool_manual_ips}",
-        f"• Passive IP → /24: {status.pool_passive_ips}",
-        f"• Уникальных префиксов: {status.pool_unique_prefixes}",
+        f"• Manual IP: {status.pool_manual_ips}",
+        f"• Passive IP: {status.pool_passive_ips}",
+        f"• Префиксов после суммаризации: {status.pool_unique_prefixes}",
         f"• Файл bird: {bird_file}",
         f"• Анонсы bird (live): {bird_live}",
         "",
