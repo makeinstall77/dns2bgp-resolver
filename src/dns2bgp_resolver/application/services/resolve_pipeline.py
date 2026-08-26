@@ -14,9 +14,10 @@ from dns2bgp_resolver.config import RefreshSettings
 from dns2bgp_resolver.domain import (
     Domain,
     DomainName,
-    ip_to_prefix24,
+    ip_to_prefix32,
     is_announcable_ipv4,
     is_announcable_prefix,
+    summarize_prefixes,
 )
 
 logger = logging.getLogger(__name__)
@@ -201,17 +202,17 @@ class ResolvePipeline:
 
         for ip in await self._repository.all_active_ips():
             if is_announcable_ipv4(ip):
-                prefixes.add(ip_to_prefix24(ip))
+                prefixes.add(ip_to_prefix32(ip))
 
         for ip in await self._repository.list_passive_ips():
             if is_announcable_ipv4(ip):
-                prefixes.add(ip_to_prefix24(ip))
+                prefixes.add(ip_to_prefix32(ip))
 
         for static in await self._repository.list_static_prefixes():
             if static.enabled and is_announcable_prefix(static.cidr):
                 prefixes.add(static.cidr)
 
-        ordered = sorted(prefixes)
+        ordered = summarize_prefixes(prefixes)
         await self._exporter.export(ordered)
         return ExportSummary(prefix_count=len(ordered), path=self._export_path)
 
