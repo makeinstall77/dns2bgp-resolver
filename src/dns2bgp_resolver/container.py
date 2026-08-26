@@ -256,6 +256,7 @@ def build_container(settings: Settings | None = None) -> AppContainer:
             settings.dnstap.listen_unix,
             passive_collector.on_response,
             socket_mode=settings.dnstap.socket_mode,
+            listen_tcp=settings.dnstap.listen_tcp,
         )
     return AppContainer(
         settings=settings,
