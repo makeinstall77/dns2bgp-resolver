@@ -12,7 +12,7 @@ from dns2bgp_resolver.application.commands import AddDomainCommand, AddPrefixCom
 from dns2bgp_resolver.application.services.list_parse import parse_import_lines
 from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
-from dns2bgp_resolver.interfaces.telegram.keyboards import confirm_import_menu, main_menu_keyboard
+from dns2bgp_resolver.interfaces.telegram.keyboards import confirm_import_menu, main_menu
 from dns2bgp_resolver.interfaces.telegram.ui import BotUi
 
 router = Router()
@@ -66,7 +66,7 @@ async def on_document(message: Message, container: AppContainer, ui: BotUi) -> N
         await ui.reply(
             message,
             f"Файл слишком большой (макс. {_MAX_FILE_BYTES // (1024 * 1024)} МБ).",
-            reply_keyboard=main_menu_keyboard(),
+            reply_markup=main_menu(),
         )
         return
 
@@ -76,7 +76,7 @@ async def on_document(message: Message, container: AppContainer, ui: BotUi) -> N
         await ui.reply(
             message,
             "Не похоже на текстовый список доменов/префиксов.",
-            reply_keyboard=main_menu_keyboard(),
+            reply_markup=main_menu(),
         )
         return
 
@@ -89,7 +89,7 @@ async def on_document(message: Message, container: AppContainer, ui: BotUi) -> N
             message,
             "Не удалось найти домены или префиксы "
             "(один домен/CIDR/IP на строку, # — комментарий).",
-            reply_keyboard=main_menu_keyboard(),
+            reply_markup=main_menu(),
         )
         return
 
@@ -98,7 +98,7 @@ async def on_document(message: Message, container: AppContainer, ui: BotUi) -> N
         await ui.reply(
             message,
             f"Слишком много записей: {total} (макс. {_MAX_ITEMS}).",
-            reply_keyboard=main_menu_keyboard(),
+            reply_markup=main_menu(),
         )
         return
 
@@ -177,10 +177,11 @@ async def cb_import_ok(callback: CallbackQuery, container: AppContainer, ui: Bot
         parts.append(
             f"Префиксы — добавлено: {p_added}, уже были: {p_exists}, ошибки: {p_errors}"
         )
-    if callback.message and callback.message.bot is not None:
-        await ui.edit(callback.message, "\n".join(parts) + "\n\nГотово.")
-        await ui.apply_reply_keyboard(
-            callback.message.bot, callback.message.chat.id, main_menu_keyboard()
+    if callback.message:
+        await ui.edit(
+            callback.message,
+            "\n".join(parts) + "\n\nГотово.",
+            reply_markup=main_menu(),
         )
 
 
@@ -192,5 +193,5 @@ async def cb_import_cancel(callback: CallbackQuery, container: AppContainer, ui:
     token = (callback.data or "").split(":", 2)[-1]
     _pop_pending(token)
     if callback.message:
-        await ui.edit(callback.message, "Импорт отменён.")
+        await ui.edit(callback.message, "Импорт отменён.", reply_markup=main_menu())
     await callback.answer("Отменено.")

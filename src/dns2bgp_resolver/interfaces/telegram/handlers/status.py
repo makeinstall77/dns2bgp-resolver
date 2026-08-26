@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 
-from aiogram import F, Router
+from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
@@ -15,7 +15,7 @@ from dns2bgp_resolver.application.services.service_status import (
 )
 from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
-from dns2bgp_resolver.interfaces.telegram.keyboards import BTN_STATUS, main_menu_keyboard
+from dns2bgp_resolver.interfaces.telegram.keyboards import back_inline
 from dns2bgp_resolver.interfaces.telegram.ui import BotUi
 
 router = Router()
@@ -56,16 +56,23 @@ async def _live_update(
             return
         left = max(0, int(deadline - time.monotonic()))
         text = await _render(container, live_left_sec=left)
-        ok = await ui.edit_by_id(bot, chat_id, message_id, text)
+        ok = await ui.edit_by_id(
+            bot, chat_id, message_id, text, reply_markup=back_inline()
+        )
         if not ok or left <= 0:
             return
 
 
-async def show_status(message: Message, container: AppContainer, ui: BotUi) -> None:
+async def show_status(
+    message: Message, container: AppContainer, ui: BotUi, *, edit: bool = False
+) -> None:
     if message.bot is None:
         return
     text = await _render(container, live_left_sec=_LIVE_SECONDS)
-    msg = await ui.reply(message, text, reply_keyboard=main_menu_keyboard())
+    if edit:
+        msg = await ui.edit(message, text, reply_markup=back_inline())
+    else:
+        msg = await ui.reply(message, text, reply_markup=back_inline())
     gen = ui.generation(message.chat.id)
     asyncio.create_task(
         _live_update(
@@ -81,7 +88,6 @@ async def show_status(message: Message, container: AppContainer, ui: BotUi) -> N
 
 
 @router.message(Command("status"))
-@router.message(F.text == BTN_STATUS)
 async def cmd_status(message: Message, container: AppContainer, ui: BotUi) -> None:
     if not allowed(container, message.from_user.id if message.from_user else None):
         await ui.reply(message, "Access denied.")

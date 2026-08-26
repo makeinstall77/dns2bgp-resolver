@@ -15,12 +15,10 @@ from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.domain import format_domain_label
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
 from dns2bgp_resolver.interfaces.telegram.keyboards import (
-    BTN_CANCEL,
-    cancel_keyboard,
+    cancel_inline,
     confirm_remove_host_menu,
     domains_menu,
     host_list_keyboard,
-    main_menu_keyboard,
     manual_host_menu,
 )
 from dns2bgp_resolver.interfaces.telegram.states import AddDomain, RemoveDomain
@@ -29,6 +27,7 @@ from dns2bgp_resolver.interfaces.telegram.ui import BotUi
 router = Router()
 
 _PAGE_SIZE = 10
+_CANCEL = cancel_inline("m:domains")
 
 
 async def _render_manual_page(container: AppContainer, page: int) -> tuple[str, object]:
@@ -79,16 +78,6 @@ def _host_text(domain) -> str:
         return f"🌐 {label}\nmatch: suffix (поддомены через dnstap)"
     ips = ", ".join(str(a.ip) for a in domain.addresses) or "—"
     return f"🌐 {label}\nIP ({len(domain.addresses)}): {ips}"
-
-
-async def _back_to_domains(message: Message, state: FSMContext, ui: BotUi) -> None:
-    await state.clear()
-    await ui.reply(
-        message,
-        "Manual domains (pre-resolve).\nМожно: example.com или *.example.com",
-        reply_markup=domains_menu(),
-        reply_keyboard=main_menu_keyboard(),
-    )
 
 
 @router.callback_query(F.data == "d:list")
@@ -251,11 +240,11 @@ async def cb_export(callback: CallbackQuery, container: AppContainer) -> None:
 async def cb_add(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
     await state.set_state(AddDomain.waiting_name)
     if callback.message:
-        await ui.reply(
+        await ui.edit(
             callback.message,
             "Домен или маска:\nexample.com / *.example.com\n"
             "Можно несколько строк сразу.",
-            reply_markup=cancel_keyboard(),
+            reply_markup=_CANCEL,
         )
     await callback.answer()
 
@@ -264,10 +253,10 @@ async def cb_add(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
 async def cb_remove(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
     await state.set_state(RemoveDomain.waiting_name)
     if callback.message:
-        await ui.reply(
+        await ui.edit(
             callback.message,
             "Enter domain to remove:",
-            reply_markup=cancel_keyboard(),
+            reply_markup=_CANCEL,
         )
     await callback.answer()
 
@@ -276,16 +265,13 @@ async def cb_remove(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> No
 async def add_domain_text(
     message: Message, container: AppContainer, state: FSMContext, ui: BotUi
 ) -> None:
-    if message.text == BTN_CANCEL:
-        await _back_to_domains(message, state, ui)
-        return
     lines = [
         ln.strip()
         for ln in (message.text or "").splitlines()
         if ln.strip() and not ln.strip().startswith("#")
     ]
     if not lines:
-        await ui.reply(message, "Введите домен или маску.", reply_markup=cancel_keyboard())
+        await ui.reply(message, "Введите домен или маску.", reply_markup=_CANCEL)
         return
 
     added = 0
@@ -309,7 +295,7 @@ async def add_domain_text(
         await ui.reply(
             message,
             f"{last_text}\nЕщё домен (можно несколько строк) или ◀ Отмена:",
-            reply_markup=cancel_keyboard(),
+            reply_markup=_CANCEL,
         )
         return
 
@@ -319,22 +305,19 @@ async def add_domain_text(
         if len(errors) > 10:
             parts.append(f"… и ещё {len(errors) - 10}")
     parts.append("Ещё домен (можно несколько строк) или ◀ Отмена:")
-    await ui.reply(message, "\n".join(parts), reply_markup=cancel_keyboard())
+    await ui.reply(message, "\n".join(parts), reply_markup=_CANCEL)
 
 
 @router.message(RemoveDomain.waiting_name, F.text)
 async def remove_domain_text(
     message: Message, container: AppContainer, state: FSMContext, ui: BotUi
 ) -> None:
-    if message.text == BTN_CANCEL:
-        await _back_to_domains(message, state, ui)
-        return
     result = await container.bus.execute(RemoveDomainCommand(name=(message.text or "").strip()))
     if not result.ok:
-        await ui.reply(message, f"Error: {result.error}", reply_markup=cancel_keyboard())
+        await ui.reply(message, f"Error: {result.error}", reply_markup=_CANCEL)
         return
     await ui.reply(
         message,
         f"{result.message or 'Removed.'}\nЕщё домен или ◀ Отмена:",
-        reply_markup=cancel_keyboard(),
+        reply_markup=_CANCEL,
     )

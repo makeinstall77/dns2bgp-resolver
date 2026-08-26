@@ -2,32 +2,40 @@ from __future__ import annotations
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 
-BTN_DOMAINS = "📋 Домены"
-BTN_AUTO = "🤖 Auto"
-BTN_PREFIXES = "🛣 Prefixes"
-BTN_LISTS = "📂 Списки"
-BTN_SETTINGS = "⚙️ Настройки"
-BTN_STATUS = "📊 Статус"
-BTN_RESOLVE = "🔄 Resolve manual"
-BTN_CANCEL = "◀ Отмена"
+BTN_HOME = "🏠 Меню"
 
 
-def main_menu_keyboard() -> ReplyKeyboardMarkup:
+def home_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=BTN_DOMAINS), KeyboardButton(text=BTN_AUTO)],
-            [KeyboardButton(text=BTN_PREFIXES), KeyboardButton(text=BTN_LISTS)],
-            [KeyboardButton(text=BTN_SETTINGS), KeyboardButton(text=BTN_STATUS)],
-            [KeyboardButton(text=BTN_RESOLVE)],
-        ],
+        keyboard=[[KeyboardButton(text=BTN_HOME)]],
         resize_keyboard=True,
+        is_persistent=True,
     )
 
 
-def cancel_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=BTN_CANCEL)]],
-        resize_keyboard=True,
+def main_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📋 Домены", callback_data="m:domains"),
+                InlineKeyboardButton(text="🤖 Auto", callback_data="m:auto"),
+            ],
+            [
+                InlineKeyboardButton(text="🛣 Prefixes", callback_data="m:prefixes"),
+                InlineKeyboardButton(text="📂 Списки", callback_data="m:lists"),
+            ],
+            [
+                InlineKeyboardButton(text="⚙️ Настройки", callback_data="m:settings"),
+                InlineKeyboardButton(text="📊 Статус", callback_data="m:status"),
+            ],
+            [InlineKeyboardButton(text="🔄 Resolve manual", callback_data="m:resolve")],
+        ]
+    )
+
+
+def cancel_inline(back_callback: str = "m:main") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="◀ Отмена", callback_data=back_callback)]]
     )
 
 
@@ -259,14 +267,14 @@ def settings_menu() -> InlineKeyboardMarkup:
     )
 
 
-def filters_menu(keywords: list[str]) -> InlineKeyboardMarkup:
+def filters_menu(keywords: list[str], *, back_callback: str = "m:auto") -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for kw in keywords[:20]:
         rows.append([InlineKeyboardButton(text=f"🗑 {kw}", callback_data=f"f:rm:{kw}")])
     rows.append(
         [
             InlineKeyboardButton(text="➕ Add", callback_data="f:add"),
-            InlineKeyboardButton(text="◀ Назад", callback_data="m:auto"),
+            InlineKeyboardButton(text="◀ Назад", callback_data=back_callback),
         ]
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)

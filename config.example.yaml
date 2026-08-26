@@ -39,13 +39,14 @@ auto_list:
   max_removal_ratio: 0.5
   confirm_ttl_seconds: 3600
 
-# Unbound sidecar: enable dnstap and point unbound at this socket.
-# unbound.conf:
-#   dnstap-enable: yes
-#   dnstap-bidirectional: yes
-#   dnstap-socket-path: "/path/to/dnstap.sock"
+# Unbound sidecar: enable dnstap and point unbound at this socket/TCP.
+# Prefer TCP if unix socket connects but never sends data frames:
+#   dnstap-ip: "127.0.0.1@9255"
+#   dnstap-tls: no
+#   dnstap-bidirectional: no
 #   dnstap-log-client-response-messages: yes
 dnstap:
   enabled: false
   listen_unix: "./data/dnstap.sock"
+  listen_tcp: ""   # e.g. "127.0.0.1:9255"
   socket_mode: 438
