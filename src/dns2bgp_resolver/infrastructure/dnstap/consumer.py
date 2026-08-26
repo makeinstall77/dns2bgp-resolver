@@ -111,10 +111,10 @@ def _decode_varint(buf: bytes, i: int) -> tuple[int, int]:
 
 def extract_dnstap_response_wire(dnstap_bytes: bytes) -> bytes | None:
     """
-    Pull Message.response_message (field 15) from a dnstap.Dnstap protobuf.
+    Pull DNS response wire from dnstap.Dnstap → Message.
 
-    Dnstap.type=MESSAGE is field 15; nested Message is field 14.
-    Inside Message: response_message is field 15 (bytes).
+    Nested Message is field 14. Prefer response_message (15); Unbound often
+    puts CLIENT_RESPONSE wire in query_message (14).
     """
     i = 0
     message_bytes: bytes | None = None
@@ -135,12 +135,13 @@ def extract_dnstap_response_wire(dnstap_bytes: bytes) -> bytes | None:
         elif wire_type == 5:  # 32-bit
             i += 4
         else:
-            return None
+            break
     if message_bytes is None:
         return None
 
     i = 0
     response: bytes | None = None
+    query_msg: bytes | None = None
     msg_type: int | None = None
     while i < len(message_bytes):
         tag, i = _decode_varint(message_bytes, i)
@@ -156,24 +157,27 @@ def extract_dnstap_response_wire(dnstap_bytes: bytes) -> bytes | None:
             length, i = _decode_varint(message_bytes, i)
             chunk = message_bytes[i : i + length]
             i += length
-            if field_no == 15:
+            if field_no == 14:
+                query_msg = chunk
+            elif field_no == 15:
                 response = chunk
         elif wire_type == 5:
             i += 4
         else:
-            return None
+            break
 
-    # CLIENT_RESPONSE=6, RESOLVER_RESPONSE=4, AUTH_RESPONSE=2, FORWARDER_RESPONSE=8
+    # CLIENT_RESPONSE=6, RESOLVER_RESPONSE=4, AUTH_RESPONSE=2, FORWARDER_RESPONSE=8, STUB_RESPONSE=10
     if msg_type is not None and msg_type not in (2, 4, 6, 8, 10):
         return None
-    return response
+    # Unbound/protobuf-c often packs the DNS reply into field 14 on CLIENT_RESPONSE.
+    return response or query_msg
 
 
 OnDnsEvent = Callable[[str, list[str]], Awaitable[None]]
 
 
 class DnstapUnixServer:
-    """Listen on a UNIX socket; unbound connects and streams dnstap frames."""
+    """Listen for unbound dnstap on unix and/or TCP; stream fstrm frames."""
 
     def __init__(
         self,
@@ -181,51 +185,71 @@ class DnstapUnixServer:
         on_response: OnDnsEvent,
         *,
         socket_mode: int = 0o666,
+        listen_tcp: str = "",
     ) -> None:
-        self._path = path
+        self._path = path.strip()
+        self._listen_tcp = listen_tcp.strip()
         self._on_response = on_response
         self._socket_mode = socket_mode
-        self._server: asyncio.AbstractServer | None = None
+        self._servers: list[asyncio.AbstractServer] = []
         self._stop = asyncio.Event()
 
     async def start(self) -> None:
         import os
 
-        path = Path(self._path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.exists():
-            path.unlink()
+        if not self._path and not self._listen_tcp:
+            raise ValueError("dnstap requires listen_unix and/or listen_tcp")
+
         self._stop.clear()
-        # umask 022 → socket 0755 before chmod; unbound needs write to connect (EACCES).
-        old_umask = os.umask(0)
-        try:
-            self._server = await asyncio.start_unix_server(
-                self._handle_client, path=str(path)
+        self._servers.clear()
+
+        if self._path:
+            path = Path(self._path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists():
+                path.unlink()
+            # umask 022 → socket 0755 before chmod; unbound needs write to connect (EACCES).
+            old_umask = os.umask(0)
+            try:
+                server = await asyncio.start_unix_server(
+                    self._handle_client, path=str(path)
+                )
+                path.chmod(self._socket_mode)
+            finally:
+                os.umask(old_umask)
+            self._servers.append(server)
+            logger.info("dnstap listening on unix %s", path)
+
+        if self._listen_tcp:
+            host, _, port_s = self._listen_tcp.rpartition(":")
+            if not host or not port_s:
+                raise ValueError(f"invalid dnstap.listen_tcp: {self._listen_tcp!r}")
+            server = await asyncio.start_server(
+                self._handle_client, host=host, port=int(port_s)
             )
-            path.chmod(self._socket_mode)
-        finally:
-            os.umask(old_umask)
-        logger.info("dnstap listening on %s", path)
+            self._servers.append(server)
+            logger.info("dnstap listening on tcp %s", self._listen_tcp)
 
     async def stop(self) -> None:
         self._stop.set()
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
-        path = Path(self._path)
-        if path.exists():
-            try:
-                path.unlink()
-            except OSError:
-                pass
+        for server in self._servers:
+            server.close()
+            await server.wait_closed()
+        self._servers.clear()
+        if self._path:
+            path = Path(self._path)
+            if path.exists():
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
         logger.info("dnstap stopped")
 
     async def _handle_client(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         peer = writer.get_extra_info("peername")
-        logger.info("dnstap client connected: %s", peer)
+        logger.debug("dnstap client connected: %s", peer)
         try:
             await handshake_as_receiver(reader, writer)
             while not self._stop.is_set():
@@ -247,7 +271,7 @@ class DnstapUnixServer:
                 await writer.wait_closed()
             except Exception:  # noqa: BLE001
                 pass
-            logger.info("dnstap client disconnected")
+            logger.debug("dnstap client disconnected")
 
     async def _dispatch_frame(self, dnstap_bytes: bytes) -> None:
         import dns.message
@@ -259,6 +283,7 @@ class DnstapUnixServer:
         try:
             msg = dns.message.from_wire(wire)
         except Exception:  # noqa: BLE001
+            logger.debug("dnstap drop: dns parse failed", exc_info=True)
             return
         if not msg.question:
             return
@@ -269,5 +294,7 @@ class DnstapUnixServer:
                 continue
             for rdata in rrset:
                 ips.append(rdata.address)
-        if ips:
-            await self._on_response(qname, ips)
+        if not ips:
+            return
+        logger.debug("dnstap q=%s ips=%s", qname, ips)
+        await self._on_response(qname, ips)
