@@ -13,9 +13,7 @@ from dns2bgp_resolver.application.services.list_parse import format_prefixes_exp
 from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
 from dns2bgp_resolver.interfaces.telegram.keyboards import (
-    BTN_CANCEL,
-    cancel_keyboard,
-    main_menu_keyboard,
+    cancel_inline,
     prefixes_list_keyboard,
     prefixes_menu,
 )
@@ -24,15 +22,7 @@ from dns2bgp_resolver.interfaces.telegram.ui import BotUi
 
 router = Router()
 
-
-async def _back_to_prefixes(message: Message, state: FSMContext, ui: BotUi) -> None:
-    await state.clear()
-    await ui.reply(
-        message,
-        "Static prefixes (IP/CIDR) — сразу в bird, без DNS.",
-        reply_markup=prefixes_menu(),
-        reply_keyboard=main_menu_keyboard(),
-    )
+_CANCEL = cancel_inline("m:prefixes")
 
 
 @router.callback_query(F.data == "p:list")
@@ -82,11 +72,11 @@ async def cb_export(callback: CallbackQuery, container: AppContainer) -> None:
 async def cb_add(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
     await state.set_state(AddPrefix.waiting_cidr)
     if callback.message:
-        await ui.reply(
+        await ui.edit(
             callback.message,
             "Введите IPv4 или CIDR (например 149.154.160.0/20).\n"
             "Можно несколько строк сразу.",
-            reply_markup=cancel_keyboard(),
+            reply_markup=_CANCEL,
         )
     await callback.answer()
 
@@ -95,10 +85,10 @@ async def cb_add(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
 async def cb_remove(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
     await state.set_state(RemovePrefix.waiting_cidr)
     if callback.message:
-        await ui.reply(
+        await ui.edit(
             callback.message,
             "Введите CIDR для удаления:",
-            reply_markup=cancel_keyboard(),
+            reply_markup=_CANCEL,
         )
     await callback.answer()
 
@@ -130,16 +120,13 @@ async def cb_remove_ok(callback: CallbackQuery, container: AppContainer, ui: Bot
 async def add_prefix_text(
     message: Message, container: AppContainer, state: FSMContext, ui: BotUi
 ) -> None:
-    if message.text == BTN_CANCEL:
-        await _back_to_prefixes(message, state, ui)
-        return
     lines = [
         ln.strip()
         for ln in (message.text or "").splitlines()
         if ln.strip() and not ln.strip().startswith("#")
     ]
     if not lines:
-        await ui.reply(message, "Введите IPv4 или CIDR.", reply_markup=cancel_keyboard())
+        await ui.reply(message, "Введите IPv4 или CIDR.", reply_markup=_CANCEL)
         return
 
     added = 0
@@ -161,7 +148,7 @@ async def add_prefix_text(
         await ui.reply(
             message,
             f"{last_ok}\nЕщё CIDR (можно несколько строк) или ◀ Отмена:",
-            reply_markup=cancel_keyboard(),
+            reply_markup=_CANCEL,
         )
         return
 
@@ -171,24 +158,21 @@ async def add_prefix_text(
         if len(errors) > 10:
             parts.append(f"… и ещё {len(errors) - 10}")
     parts.append("Ещё CIDR (можно несколько строк) или ◀ Отмена:")
-    await ui.reply(message, "\n".join(parts), reply_markup=cancel_keyboard())
+    await ui.reply(message, "\n".join(parts), reply_markup=_CANCEL)
 
 
 @router.message(RemovePrefix.waiting_cidr, F.text)
 async def remove_prefix_text(
     message: Message, container: AppContainer, state: FSMContext, ui: BotUi
 ) -> None:
-    if message.text == BTN_CANCEL:
-        await _back_to_prefixes(message, state, ui)
-        return
     result = await container.bus.execute(
         RemovePrefixCommand(cidr=(message.text or "").strip())
     )
     if not result.ok:
-        await ui.reply(message, f"Error: {result.error}", reply_markup=cancel_keyboard())
+        await ui.reply(message, f"Error: {result.error}", reply_markup=_CANCEL)
         return
     await ui.reply(
         message,
         f"{result.message or 'Removed.'}\nЕщё CIDR или ◀ Отмена:",
-        reply_markup=cancel_keyboard(),
+        reply_markup=_CANCEL,
     )

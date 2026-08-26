@@ -4,6 +4,7 @@ import logging
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware, Bot, Dispatcher, F, Router
+from aiogram.filters import StateFilter
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Message, TelegramObject
 
@@ -19,30 +20,9 @@ from dns2bgp_resolver.interfaces.telegram.handlers import (
     settings,
     status,
 )
-from dns2bgp_resolver.interfaces.telegram.keyboards import (
-    BTN_AUTO,
-    BTN_CANCEL,
-    BTN_DOMAINS,
-    BTN_LISTS,
-    BTN_PREFIXES,
-    BTN_RESOLVE,
-    BTN_SETTINGS,
-    BTN_STATUS,
-    main_menu_keyboard,
-)
+from dns2bgp_resolver.interfaces.telegram.keyboards import BTN_HOME, main_menu
 from dns2bgp_resolver.interfaces.telegram.sync_alert import TelegramSyncAlertNotifier
 from dns2bgp_resolver.interfaces.telegram.ui import BotUi
-
-_MENU_BUTTONS = {
-    BTN_DOMAINS,
-    BTN_AUTO,
-    BTN_PREFIXES,
-    BTN_LISTS,
-    BTN_SETTINGS,
-    BTN_STATUS,
-    BTN_RESOLVE,
-    BTN_CANCEL,
-}
 
 logger = logging.getLogger(__name__)
 
@@ -89,14 +69,14 @@ async def run_telegram_bot(container: AppContainer) -> None:
     # child routers, so a catch-all here would steal FSM text input.
     fallback_router = Router()
 
-    @fallback_router.message(F.text & ~F.text.in_(_MENU_BUTTONS))
+    @fallback_router.message(StateFilter(None), F.text & ~F.text.in_({BTN_HOME}))
     async def fallback(message: Message, container: AppContainer, ui: BotUi) -> None:
         if not allowed(container, message.from_user.id if message.from_user else None):
             return
         await ui.reply(
             message,
             "Выберите действие в меню.",
-            reply_keyboard=main_menu_keyboard(),
+            reply_markup=main_menu(),
         )
 
     dp.include_router(fallback_router)

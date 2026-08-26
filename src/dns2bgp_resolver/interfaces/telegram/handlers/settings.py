@@ -11,16 +11,15 @@ from dns2bgp_resolver.application.commands import (
 )
 from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.interfaces.telegram.keyboards import (
-    BTN_CANCEL,
-    cancel_keyboard,
+    cancel_inline,
     filters_menu,
-    main_menu_keyboard,
-    settings_menu,
 )
 from dns2bgp_resolver.interfaces.telegram.states import SetGlobalInterval
 from dns2bgp_resolver.interfaces.telegram.ui import BotUi
 
 router = Router()
+
+_CANCEL = cancel_inline("m:settings")
 
 
 async def render_settings_summary(container: AppContainer) -> str:
@@ -29,24 +28,14 @@ async def render_settings_summary(container: AppContainer) -> str:
     return f"Settings\nDefault sync interval: {interval}s"
 
 
-async def _back_to_settings(
-    message: Message, container: AppContainer, state: FSMContext, ui: BotUi
-) -> None:
-    await state.clear()
-    text = await render_settings_summary(container)
-    await ui.reply(
-        message, text, reply_markup=settings_menu(), reply_keyboard=main_menu_keyboard()
-    )
-
-
 @router.callback_query(F.data == "st:interval")
 async def cb_global_interval(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
     await state.set_state(SetGlobalInterval.waiting_seconds)
     if callback.message:
-        await ui.reply(
+        await ui.edit(
             callback.message,
             "Default sync interval (seconds, min 60):",
-            reply_markup=cancel_keyboard(),
+            reply_markup=_CANCEL,
         )
     await callback.answer()
 
@@ -55,22 +44,19 @@ async def cb_global_interval(callback: CallbackQuery, state: FSMContext, ui: Bot
 async def set_global_interval(
     message: Message, container: AppContainer, state: FSMContext, ui: BotUi
 ) -> None:
-    if message.text == BTN_CANCEL:
-        await _back_to_settings(message, container, state, ui)
-        return
     try:
         seconds = int((message.text or "").strip())
     except ValueError:
-        await ui.reply(message, "Enter a number.", reply_markup=cancel_keyboard())
+        await ui.reply(message, "Enter a number.", reply_markup=_CANCEL)
         return
     result = await container.bus.execute(SetDefaultSyncIntervalCommand(seconds=seconds))
     if not result.ok:
-        await ui.reply(message, f"Error: {result.error}", reply_markup=cancel_keyboard())
+        await ui.reply(message, f"Error: {result.error}", reply_markup=_CANCEL)
         return
     await ui.reply(
         message,
         f"{result.message or 'Updated.'}\nЕщё interval или ◀ Отмена:",
-        reply_markup=cancel_keyboard(),
+        reply_markup=_CANCEL,
     )
 
 
@@ -82,5 +68,9 @@ async def cb_settings_filters(
     keywords = result.data or []
     text = "Exclude keywords:" if keywords else "No exclude keywords."
     if callback.message:
-        await ui.edit(callback.message, text, reply_markup=filters_menu(keywords))
+        await ui.edit(
+            callback.message,
+            text,
+            reply_markup=filters_menu(keywords, back_callback="m:settings"),
+        )
     await callback.answer()

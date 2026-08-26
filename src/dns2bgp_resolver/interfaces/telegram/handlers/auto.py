@@ -15,13 +15,11 @@ from dns2bgp_resolver.application.commands import (
 from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
 from dns2bgp_resolver.interfaces.telegram.keyboards import (
-    BTN_CANCEL,
     auto_host_menu,
     auto_menu,
-    cancel_keyboard,
+    cancel_inline,
     filters_menu,
     host_list_keyboard,
-    main_menu_keyboard,
 )
 from dns2bgp_resolver.interfaces.telegram.states import AddFilter, SearchAuto
 from dns2bgp_resolver.interfaces.telegram.ui import BotUi
@@ -30,6 +28,8 @@ router = Router()
 
 _PAGE_SIZE = 10
 _search_cache: dict[str, str] = {}
+_CANCEL_AUTO = cancel_inline("m:auto")
+_CANCEL_FILTERS = cancel_inline("a:filters")
 
 
 def _cache_query(query: str) -> str:
@@ -161,31 +161,18 @@ async def cb_host(callback: CallbackQuery, container: AppContainer, ui: BotUi) -
 async def cb_search(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
     await state.set_state(SearchAuto.waiting_query)
     if callback.message:
-        await ui.reply(
+        await ui.edit(
             callback.message,
             "Enter search query:",
-            reply_markup=cancel_keyboard(),
+            reply_markup=_CANCEL_AUTO,
         )
     await callback.answer()
-
-
-async def _back_to_auto(message: Message, state: FSMContext, ui: BotUi) -> None:
-    await state.clear()
-    await ui.reply(
-        message,
-        "Auto domains — только индекс.\nIP появляются по DNS-запросам (dnstap), без pre-resolve.",
-        reply_markup=auto_menu(),
-        reply_keyboard=main_menu_keyboard(),
-    )
 
 
 @router.message(SearchAuto.waiting_query, F.text)
 async def search_query(
     message: Message, container: AppContainer, state: FSMContext, ui: BotUi
 ) -> None:
-    if message.text == BTN_CANCEL:
-        await _back_to_auto(message, state, ui)
-        return
     query = (message.text or "").strip()
     text, markup = await _render_auto_page(
         container,
@@ -195,7 +182,8 @@ async def search_query(
         back_callback="m:auto",
         with_query_key=True,
     )
-    await ui.reply(message, text, reply_markup=markup, reply_keyboard=cancel_keyboard())
+    await state.clear()
+    await ui.reply(message, text, reply_markup=markup)
 
 
 @router.callback_query(F.data.startswith("s:"))
@@ -227,7 +215,10 @@ async def cb_search_page(callback: CallbackQuery, container: AppContainer, ui: B
 
 
 @router.callback_query(F.data == "a:filters")
-async def cb_filters(callback: CallbackQuery, container: AppContainer, ui: BotUi) -> None:
+async def cb_filters(
+    callback: CallbackQuery, container: AppContainer, state: FSMContext, ui: BotUi
+) -> None:
+    await state.clear()
     result = await container.bus.execute(ListExcludeKeywordsCommand())
     keywords = result.data or []
     text = "🏷 Exclude keywords:" if keywords else "🏷 No exclude keywords."
@@ -240,37 +231,24 @@ async def cb_filters(callback: CallbackQuery, container: AppContainer, ui: BotUi
 async def cb_filter_add(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
     await state.set_state(AddFilter.waiting_keyword)
     if callback.message:
-        await ui.reply(callback.message, "Enter keyword:", reply_markup=cancel_keyboard())
+        await ui.edit(callback.message, "Enter keyword:", reply_markup=_CANCEL_FILTERS)
     await callback.answer()
-
-
-async def _back_to_filters(
-    message: Message, container: AppContainer, state: FSMContext, ui: BotUi
-) -> None:
-    await state.clear()
-    result = await container.bus.execute(ListExcludeKeywordsCommand())
-    keywords = result.data or []
-    text = "🏷 Exclude keywords:" if keywords else "🏷 No exclude keywords."
-    await ui.reply(
-        message, text, reply_markup=filters_menu(keywords), reply_keyboard=main_menu_keyboard()
-    )
 
 
 @router.message(AddFilter.waiting_keyword, F.text)
 async def filter_add_text(
     message: Message, container: AppContainer, state: FSMContext, ui: BotUi
 ) -> None:
-    if message.text == BTN_CANCEL:
-        await _back_to_filters(message, container, state, ui)
-        return
-    result = await container.bus.execute(AddExcludeKeywordCommand(keyword=(message.text or "").strip()))
+    result = await container.bus.execute(
+        AddExcludeKeywordCommand(keyword=(message.text or "").strip())
+    )
     if not result.ok:
-        await ui.reply(message, f"Error: {result.error}", reply_markup=cancel_keyboard())
+        await ui.reply(message, f"Error: {result.error}", reply_markup=_CANCEL_FILTERS)
         return
     await ui.reply(
         message,
         f"{result.message or 'Added.'}\nЕщё keyword или ◀ Отмена:",
-        reply_markup=cancel_keyboard(),
+        reply_markup=_CANCEL_FILTERS,
     )
 
 
