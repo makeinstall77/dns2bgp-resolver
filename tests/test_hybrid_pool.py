@@ -129,7 +129,7 @@ async def test_passive_hit_export(repo, tmp_path: Path):
     await collector.on_response("cdn.blocked.com", ["1.2.3.4"])
     await pipe.flush_pending_export()
     text = bird_path.read_text()
-    assert "1.2.3.0/24" in text
+    assert "1.2.3.4/32" in text
 
 
 @pytest.mark.asyncio
