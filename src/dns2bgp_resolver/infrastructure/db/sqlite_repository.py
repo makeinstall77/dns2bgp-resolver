@@ -14,6 +14,7 @@ from dns2bgp_resolver.application.ports.repository import (
     AutoSyncResult,
     DEFAULT_SYNC_INTERVAL_KEY,
     DEFAULT_SYNC_INTERVAL_SECONDS,
+    DOMAIN_LISTS_SEEDED_KEY,
     DomainListCreate,
     DomainListUpdate,
     DomainRepository,
@@ -606,13 +607,23 @@ class SqlAlchemyDomainRepository(DomainRepository):
         list_type: str,
         url: str | None,
         sync_interval: int,
-    ) -> DomainList:
+    ) -> DomainList | None:
         async with self._session_factory() as session:
+            seeded = await session.get(AppSettingRow, DOMAIN_LISTS_SEEDED_KEY)
             existing = await session.execute(select(DomainListRow.id).limit(1))
-            if existing.scalar_one_or_none() is not None:
+            has_lists = existing.scalar_one_or_none() is not None
+
+            if seeded is not None:
+                if not has_lists:
+                    return None
                 result = await session.execute(select(DomainListRow).limit(1))
-                row = result.scalar_one()
-                return _row_to_domain_list(row)
+                return _row_to_domain_list(result.scalar_one())
+
+            if has_lists:
+                session.add(AppSettingRow(key=DOMAIN_LISTS_SEEDED_KEY, value="1"))
+                await session.commit()
+                result = await session.execute(select(DomainListRow).limit(1))
+                return _row_to_domain_list(result.scalar_one())
 
             setting = await session.get(AppSettingRow, DEFAULT_SYNC_INTERVAL_KEY)
             if setting is None:
@@ -622,6 +633,7 @@ class SqlAlchemyDomainRepository(DomainRepository):
                         value=str(sync_interval),
                     )
                 )
+            session.add(AppSettingRow(key=DOMAIN_LISTS_SEEDED_KEY, value="1"))
             list_row = DomainListRow(
                 name=name,
                 type=list_type,
