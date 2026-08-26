@@ -56,8 +56,15 @@ async def _live_update(
             return
         left = max(0, int(deadline - time.monotonic()))
         text = await _render(container, live_left_sec=left)
+        if ui.generation(chat_id) != generation or ui.screen_id(chat_id) != message_id:
+            return
         ok = await ui.edit_by_id(
-            bot, chat_id, message_id, text, reply_markup=back_inline()
+            bot,
+            chat_id,
+            message_id,
+            text,
+            reply_markup=back_inline(),
+            if_generation=generation,
         )
         if not ok or left <= 0:
             return
