@@ -60,6 +60,9 @@ class AutoListSettings(BaseModel):
 class DnstapSettings(BaseModel):
     enabled: bool = False
     listen_unix: str = "./data/dnstap.sock"
+    """Unix socket path; empty to disable unix listen."""
+    listen_tcp: str = ""
+    """Optional TCP listen addr host:port (e.g. 127.0.0.1:9255). Prefer over unix if unbound drops frames on AF_UNIX."""
     socket_mode: int = 0o666
 
 

@@ -16,6 +16,7 @@ from dns2bgp_resolver.domain import (
 
 DEFAULT_SYNC_INTERVAL_KEY = "default_sync_interval"
 DEFAULT_SYNC_INTERVAL_SECONDS = 86400
+DOMAIN_LISTS_SEEDED_KEY = "domain_lists_seeded"
 
 
 @dataclass(frozen=True, slots=True)

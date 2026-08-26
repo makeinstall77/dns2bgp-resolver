@@ -98,14 +98,31 @@ dnstap:
   listen_unix: "/var/lib/dns2bgp/dnstap.sock"
 ```
 
-In `unbound.conf`:
+In `unbound.conf` (TCP recommended — unix often connects without data frames):
 
 ```
 dnstap:
   dnstap-enable: yes
-  dnstap-bidirectional: yes
-  dnstap-socket-path: "/var/lib/dns2bgp/dnstap.sock"
+  dnstap-bidirectional: no
+  dnstap-ip: "127.0.0.1@9255"
+  dnstap-tls: no
   dnstap-log-client-response-messages: yes
+```
+
+Matching `config.yaml`:
+
+```
+dnstap:
+  enabled: true
+  listen_unix: ""
+  listen_tcp: "127.0.0.1:9255"
+```
+
+Unix socket alternative:
+
+```
+dnstap-socket-path: "/var/lib/dns2bgp/dnstap.sock"
+dnstap-bidirectional: no
 ```
 
 If AppArmor confines unbound, allow the socket (e.g. in `/etc/apparmor.d/local/usr.sbin.unbound`):
