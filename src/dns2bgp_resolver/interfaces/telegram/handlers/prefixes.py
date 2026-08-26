@@ -36,7 +36,7 @@ async def cb_list(callback: CallbackQuery, container: AppContainer, ui: BotUi) -
         return
     items = [(p.cidr, p.name) for p in (result.data or [])]
     if not items:
-        text = "🛣 Static prefixes: пусто.\nCIDR идут в bird как есть (без /24)."
+        text = "🛣 Static prefixes: пусто.\nПри экспорте: /32 → /24 → соседние сливаются."
         markup = prefixes_menu()
     else:
         text = f"🛣 Static prefixes ({len(items)}):\nнажмите чтобы удалить"

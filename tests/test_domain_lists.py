@@ -119,3 +119,17 @@ def test_ip_to_prefix24_dedup():
     assert ip_to_prefix24("1.2.3.5") == "1.2.3.0/24"
     prefixes = {ip_to_prefix24("1.2.3.4"), ip_to_prefix24("1.2.3.5")}
     assert prefixes == {"1.2.3.0/24"}
+
+
+def test_summarize_prefixes():
+    from dns2bgp_resolver.domain import summarize_prefixes
+
+    assert summarize_prefixes(["1.2.3.4/32"]) == ["1.2.3.4/32"]
+    assert summarize_prefixes(["1.2.3.4/32", "1.2.3.10/32"]) == ["1.2.3.0/24"]
+    assert summarize_prefixes(["1.2.3.0/24", "1.2.2.0/24"]) == ["1.2.2.0/23"]
+    assert summarize_prefixes(["1.2.2.0/23", "1.2.0.0/23"]) == ["1.2.0.0/22"]
+    assert summarize_prefixes(["1.2.3.4/32", "1.2.3.0/24"]) == ["1.2.3.0/24"]
+    assert summarize_prefixes(["8.8.8.8/32", "1.2.3.4/32", "1.2.3.5/32"]) == [
+        "1.2.3.0/24",
+        "8.8.8.8/32",
+    ]

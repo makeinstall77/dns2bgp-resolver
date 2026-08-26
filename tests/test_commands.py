@@ -145,7 +145,7 @@ async def test_resolve_change_triggers_export(pipeline, repo, bird_path: Path):
     dns.mapping["example.com"] = [("9.9.9.9", 60)]
     third = await pipe.resolve_one(DomainName("example.com"))
     assert third.changed
-    assert "9.9.9.0/24" in bird_path.read_text(encoding="utf-8")
+    assert "9.9.9.9/32" in bird_path.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio
@@ -176,17 +176,17 @@ async def test_resolve_export_coalesced_by_interval(repo, bird_path: Path):
 
     first = await pipe.resolve_one(DomainName("a.example"))
     assert first.exported
-    assert "1.1.1.0/24" in bird_path.read_text(encoding="utf-8")
-    assert "2.2.2.0/24" not in bird_path.read_text(encoding="utf-8")
+    assert "1.1.1.1/32" in bird_path.read_text(encoding="utf-8")
+    assert "2.2.2.2/32" not in bird_path.read_text(encoding="utf-8")
 
     second = await pipe.resolve_one(DomainName("b.example"))
     assert second.changed
     assert not second.exported
-    assert "2.2.2.0/24" not in bird_path.read_text(encoding="utf-8")
+    assert "2.2.2.2/32" not in bird_path.read_text(encoding="utf-8")
 
     assert pipe._flush_task is not None
     await asyncio.wait_for(pipe._flush_task, timeout=1.0)
-    assert "2.2.2.0/24" in bird_path.read_text(encoding="utf-8")
+    assert "2.2.2.2/32" in bird_path.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio
@@ -400,7 +400,10 @@ async def test_resolve_filters_non_announcable_ips(repo, bird_path: Path):
     assert domain is not None
     assert [str(a.ip) for a in domain.addresses] == ["1.2.3.4"]
     text = bird_path.read_text(encoding="utf-8")
-    assert "1.2.3.0/24" in text
+    assert "1.2.3.4/32" in text
     assert "127.0.0.0/24" not in text
     assert "10.0.0.0/24" not in text
     assert "224.0.0.0/24" not in text
+    assert "127.0.0.1/32" not in text
+    assert "10.0.0.1/32" not in text
+    assert "224.0.0.1/32" not in text
