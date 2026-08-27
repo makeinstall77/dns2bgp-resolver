@@ -50,3 +50,17 @@ dnstap:
   listen_unix: "./data/dnstap.sock"
   listen_tcp: ""   # e.g. "127.0.0.1:9255"
   socket_mode: 438
+
+# IPv6: off | suppress | announce
+# suppress — export DomainIndex for dnsdist AAAA NODATA (VPN IPv4-only).
+# announce — reserved for future Bird IPv6 export (stub).
+# See deploy/dnsdist.example.conf
+ipv6:
+  mode: off
+  dnsdist_list_path: "./data/aaaa-suppress.domains"
+  dnsdist_reload_enable: false
+  dnsdist_reload_cmd:
+    - dnsdist
+    - "-c"
+    - "127.0.0.1:5199"
+    - "reloadDns2bgpDomains()"

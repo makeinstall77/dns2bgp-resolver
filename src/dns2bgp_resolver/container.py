@@ -61,6 +61,7 @@ from dns2bgp_resolver.application.services.auto_list_sync import (
     NullSyncAlertNotifier,
 )
 from dns2bgp_resolver.application.services.domain_index_service import DomainIndexService
+from dns2bgp_resolver.application.services.ipv6_policy import ModeBasedIpv6Policy
 from dns2bgp_resolver.application.services.passive_dns import PassiveDnsCollector
 from dns2bgp_resolver.application.services.resolve_pipeline import ResolvePipeline
 from dns2bgp_resolver.config import Settings
@@ -69,6 +70,7 @@ from dns2bgp_resolver.domain.domain_index import DomainIndex
 from dns2bgp_resolver.infrastructure.bird.static_file_exporter import StaticFileBirdExporter
 from dns2bgp_resolver.infrastructure.db.sqlite_repository import SqlAlchemyDomainRepository
 from dns2bgp_resolver.infrastructure.dns.dnspython_resolver import DnspythonResolver
+from dns2bgp_resolver.infrastructure.dnsdist.domain_list_exporter import DnsdistDomainListExporter
 from dns2bgp_resolver.infrastructure.dnstap.consumer import DnstapUnixServer
 from dns2bgp_resolver.infrastructure.scheduling.auto_list_scheduler import AutoListSyncScheduler
 from dns2bgp_resolver.infrastructure.scheduling.refresh_scheduler import RefreshScheduler
@@ -101,6 +103,10 @@ class AppContainer:
         bird_dir = Path(self.settings.bird.include_path).parent
         bird_dir.mkdir(parents=True, exist_ok=True)
         bird_dir.chmod(0o755)
+        if self.settings.ipv6.mode == "suppress":
+            ipv6_dir = Path(self.settings.ipv6.dnsdist_list_path).parent
+            ipv6_dir.mkdir(parents=True, exist_ok=True)
+            ipv6_dir.chmod(0o755)
         await self.repository.initialize()
         await self.auto_sync_service.cleanup_expired_pending()
         await self._seed_exclude_keywords()
@@ -202,7 +208,11 @@ def build_container(settings: Settings | None = None) -> AppContainer:
         export_min_interval=settings.bird.export_min_interval,
     )
     domain_index = DomainIndex()
-    index_service = DomainIndexService(repository, domain_index)
+    ipv6_policy = ModeBasedIpv6Policy(
+        settings.ipv6,
+        DnsdistDomainListExporter(settings.ipv6),
+    )
+    index_service = DomainIndexService(repository, domain_index, ipv6_policy=ipv6_policy)
     passive_collector = PassiveDnsCollector(domain_index, pipeline)
     auto_sync_service = DomainListSyncService(
         repository=repository,
