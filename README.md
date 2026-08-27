@@ -1,5 +1,7 @@
 # dns2bgp-resolver
 
+[English](README.md) | [Русский](README.ru.md)
+
 Resolve a list of domains into IPv4 addresses and publish them as bird static routes for VPN traffic steering.
 
 CLI, Telegram bot, and web UI all talk to the same command bus. Persistence goes through a repository port (SQLite by default; PostgreSQL via the same SQLAlchemy adapter and a different URL).
@@ -17,7 +19,7 @@ sudo apt install python3 python3-venv python3-pip dpkg-dev
 Build and install:
 
 ```bash
-git clone <repo-url> && cd dns2bgp-resolver
+git clone https://github.com/makeinstall77/dns2bgp-resolver.git && cd dns2bgp-resolver
 ./scripts/build-deb.sh
 sudo dpkg -i dist/dns2bgp-resolver_*.deb
 ```
@@ -230,3 +232,7 @@ Address rows already store `family`; full `announce` is a DNS/dnstap + Bird `ipv
 ```bash
 pytest
 ```
+
+## License
+
+[MIT](LICENSE)
