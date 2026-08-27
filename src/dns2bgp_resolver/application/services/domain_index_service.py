@@ -31,5 +31,6 @@ class DomainIndexService:
         size = self._index.rebuild(rules=rules)
         logger.info("domain index rebuilt: %d name(s)", size)
         if self._ipv6_policy is not None:
-            await self._ipv6_policy.apply(self._index)
+            names = await self._repository.list_ipv6_suppress_names()
+            await self._ipv6_policy.apply(self._index, suppress_names=names)
         return size

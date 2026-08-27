@@ -205,6 +205,7 @@ class Domain:
     list_id: int | None = None
     enabled: bool = True
     match_mode: MatchMode = "exact"
+    suppress_ipv6: bool = True
     created_at: datetime | None = None
     next_resolve_at: datetime | None = None
     last_resolved_at: datetime | None = None
@@ -218,9 +219,15 @@ class Domain:
         *,
         source: DomainSource = "manual",
         match_mode: MatchMode | None = None,
+        suppress_ipv6: bool = True,
     ) -> Self:
         parsed, mode = parse_domain_input(name)
-        return cls(name=parsed, source=source, match_mode=match_mode or mode)
+        return cls(
+            name=parsed,
+            source=source,
+            match_mode=match_mode or mode,
+            suppress_ipv6=suppress_ipv6,
+        )
 
 
 @dataclass(frozen=True, slots=True)

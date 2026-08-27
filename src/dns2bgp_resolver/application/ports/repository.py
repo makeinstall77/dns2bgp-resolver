@@ -17,6 +17,8 @@ from dns2bgp_resolver.domain import (
 DEFAULT_SYNC_INTERVAL_KEY = "default_sync_interval"
 DEFAULT_SYNC_INTERVAL_SECONDS = 86400
 DOMAIN_LISTS_SEEDED_KEY = "domain_lists_seeded"
+SUPPRESS_IPV6_MANUAL_DEFAULT_KEY = "suppress_ipv6_manual_default"
+SUPPRESS_IPV6_AUTO_DEFAULT_KEY = "suppress_ipv6_auto_default"
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +196,18 @@ class DomainRepository(ABC):
         ...
 
     @abstractmethod
+    async def get_suppress_ipv6_defaults(self) -> tuple[bool, bool]:
+        """Return (manual_default, auto_default)."""
+
+    @abstractmethod
+    async def set_suppress_ipv6_manual_default(self, enabled: bool) -> None:
+        ...
+
+    @abstractmethod
+    async def set_suppress_ipv6_auto_default(self, enabled: bool) -> None:
+        """Set auto default and apply to all auto domains."""
+
+    @abstractmethod
     async def list_exclude_keywords(self) -> list[str]:
         ...
 
@@ -216,6 +230,14 @@ class DomainRepository(ABC):
     @abstractmethod
     async def list_index_rules(self) -> list[tuple[str, str]]:
         """Enabled (name, match_mode) pairs for the in-memory match index."""
+
+    @abstractmethod
+    async def list_ipv6_suppress_names(self) -> list[str]:
+        """Enabled domain names that should suppress AAAA (dnsdist export)."""
+
+    @abstractmethod
+    async def set_suppress_ipv6(self, domain_id: int, suppress: bool) -> Domain | None:
+        """Update suppress_ipv6 for a domain. Return None if missing."""
 
     @abstractmethod
     async def replace_addresses(
