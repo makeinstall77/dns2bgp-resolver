@@ -196,7 +196,7 @@ def manual_host_menu(
     page: int,
     *,
     is_mask: bool = False,
-    suppress_ipv6: bool = True,
+    suppress_ipv6: str = "default",
 ) -> InlineKeyboardMarkup:
     actions: list[InlineKeyboardButton] = []
     if not is_mask:
@@ -210,7 +210,12 @@ def manual_host_menu(
             text="🗑 Удалить", callback_data=f"d:rmid:{domain_id}:{page}"
         )
     )
-    v6_label = "🚫 AAAA выкл" if suppress_ipv6 else "✅ AAAA вкл"
+    if suppress_ipv6 == "on":
+        v6_label = "🚫 AAAA выкл"
+    elif suppress_ipv6 == "off":
+        v6_label = "✅ AAAA вкл"
+    else:
+        v6_label = "⚙️ AAAA дефолт"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             actions,

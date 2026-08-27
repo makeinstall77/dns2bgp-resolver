@@ -7,7 +7,7 @@ import pytest
 from dns2bgp_resolver.application.services.domain_index_service import DomainIndexService
 from dns2bgp_resolver.application.services.ipv6_policy import ModeBasedIpv6Policy
 from dns2bgp_resolver.config import Ipv6Settings
-from dns2bgp_resolver.domain import Domain
+from dns2bgp_resolver.domain import Domain, next_ipv6_suppress_mode, resolve_ipv6_suppress
 from dns2bgp_resolver.domain.domain_index import DomainIndex
 from dns2bgp_resolver.infrastructure.db.sqlite_repository import SqlAlchemyDomainRepository
 from dns2bgp_resolver.infrastructure.dnsdist.domain_list_exporter import DnsdistDomainListExporter
@@ -25,6 +25,16 @@ def test_names_snapshot():
     idx = DomainIndex()
     idx.rebuild(rules=[("exact.com", "exact"), ("suffix.com", "suffix")])
     assert idx.names_snapshot() == frozenset({"exact.com", "suffix.com"})
+
+
+def test_resolve_and_cycle():
+    assert resolve_ipv6_suppress("default", global_default=True) is True
+    assert resolve_ipv6_suppress("default", global_default=False) is False
+    assert resolve_ipv6_suppress("on", global_default=False) is True
+    assert resolve_ipv6_suppress("off", global_default=True) is False
+    assert next_ipv6_suppress_mode("default") == "on"
+    assert next_ipv6_suppress_mode("on") == "off"
+    assert next_ipv6_suppress_mode("off") == "default"
 
 
 @pytest.mark.asyncio
@@ -100,7 +110,7 @@ async def test_rebuild_triggers_suppress(repo, tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_suppress_respects_per_domain_flag(repo, tmp_path: Path):
+async def test_suppress_tristate_override(repo, tmp_path: Path):
     path = tmp_path / "list.domains"
     settings = Ipv6Settings(
         mode="suppress",
@@ -110,20 +120,38 @@ async def test_suppress_respects_per_domain_flag(repo, tmp_path: Path):
     policy = ModeBasedIpv6Policy(settings)
     idx = DomainIndex()
     svc = DomainIndexService(repo, idx, ipv6_policy=policy)
-    d1 = await repo.add(Domain.create("on.test", source="manual", suppress_ipv6=True))
-    d2 = await repo.add(Domain.create("off.test", source="manual", suppress_ipv6=False))
+
+    inherit = await repo.add(Domain.create("inherit.test", source="manual"))
+    forced_on = await repo.add(
+        Domain.create("force.on", source="manual", suppress_ipv6="on")
+    )
+    forced_off = await repo.add(
+        Domain.create("force.off", source="manual", suppress_ipv6="off")
+    )
+    assert inherit.suppress_ipv6 == "default"
+
+    await repo.set_suppress_ipv6_manual_default(True)
     await svc.rebuild()
     text = path.read_text(encoding="utf-8")
-    assert "on.test" in text
-    assert "off.test" not in text
-    await repo.set_suppress_ipv6(d2.id, True)
+    assert "inherit.test" in text
+    assert "force.on" in text
+    assert "force.off" not in text
+
+    await repo.set_suppress_ipv6_manual_default(False)
     await svc.rebuild()
-    assert "off.test" in path.read_text(encoding="utf-8")
-    assert d1.id is not None
+    text = path.read_text(encoding="utf-8")
+    assert "inherit.test" not in text
+    assert "force.on" in text
+    assert "force.off" not in text
+
+    await repo.set_suppress_ipv6(forced_off.id, "default")
+    await svc.rebuild()
+    assert "force.off" not in path.read_text(encoding="utf-8")
+    assert forced_on.id is not None
 
 
 @pytest.mark.asyncio
-async def test_suppress_auto_default_bulk(repo, tmp_path: Path):
+async def test_suppress_auto_default_inherit(repo, tmp_path: Path):
     path = tmp_path / "list.domains"
     settings = Ipv6Settings(
         mode="suppress",
@@ -133,9 +161,9 @@ async def test_suppress_auto_default_bulk(repo, tmp_path: Path):
     policy = ModeBasedIpv6Policy(settings)
     idx = DomainIndex()
     svc = DomainIndexService(repo, idx, ipv6_policy=policy)
-    await repo.add(Domain.create("manual.on", source="manual", suppress_ipv6=True))
-    await repo.add(Domain.create("auto.one", source="auto", suppress_ipv6=True))
-    await repo.add(Domain.create("auto.two", source="auto", suppress_ipv6=True))
+    await repo.add(Domain.create("manual.on", source="manual", suppress_ipv6="on"))
+    await repo.add(Domain.create("auto.one", source="auto"))
+    await repo.add(Domain.create("auto.two", source="auto"))
     await svc.rebuild()
     text = path.read_text(encoding="utf-8")
     assert "manual.on" in text and "auto.one" in text
@@ -146,10 +174,6 @@ async def test_suppress_auto_default_bulk(repo, tmp_path: Path):
     assert "manual.on" in text
     assert "auto.one" not in text
     assert "auto.two" not in text
-
-    await repo.set_suppress_ipv6_manual_default(False)
-    manual, auto = await repo.get_suppress_ipv6_defaults()
-    assert manual is False and auto is False
 
 
 @pytest.mark.asyncio
