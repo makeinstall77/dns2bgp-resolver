@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from dns2bgp_resolver.config import Ipv6Settings
+from dns2bgp_resolver.infrastructure.systemd_util import resolve_dnsdist_reload_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,10 @@ class DnsdistDomainListExporter:
             raise
 
     async def _reload_dnsdist(self) -> None:
-        cmd = self._settings.dnsdist_reload_cmd
+        cmd = resolve_dnsdist_reload_cmd(
+            list(self._settings.dnsdist_reload_cmd),
+            key_file=self._settings.dnsdist_console_key_file,
+        )
         if not cmd:
             logger.warning("dnsdist reload enabled but dnsdist_reload_cmd is empty")
             return
@@ -77,7 +81,7 @@ class DnsdistDomainListExporter:
                     stderr.decode(errors="replace"),
                 )
             else:
-                logger.info("dnsdist reload ok")
+                logger.info("dnsdist reload ok (%s)", " ".join(cmd[:3]))
         except FileNotFoundError:
             logger.warning("dnsdist reload binary not found: %s", cmd[0])
         except Exception as exc:  # noqa: BLE001
