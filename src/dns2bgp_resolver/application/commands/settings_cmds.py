@@ -74,8 +74,8 @@ class SetSuppressIpv6DefaultHandler:
             await self._repository.set_suppress_ipv6_manual_default(command.enabled)
         else:
             await self._repository.set_suppress_ipv6_auto_default(command.enabled)
-            if self._index_service is not None:
-                await self._index_service.rebuild()
+        if self._index_service is not None:
+            await self._index_service.rebuild()
         view = await _load_settings(self._repository)
         label = "Manual" if command.scope == "manual" else "Auto"
         state = "вкл" if command.enabled else "выкл"

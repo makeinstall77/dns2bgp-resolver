@@ -39,8 +39,8 @@ async def render_settings_summary(container: AppContainer) -> tuple[str, object]
         f"ipv6.mode (config): {mode}\n"
         f"AAAA suppress default — Manual: {'ON' if manual else 'OFF'}, "
         f"Auto: {'ON' if auto else 'OFF'}\n"
-        "Manual: дефолт для новых доменов (у элемента можно переопределить).\n"
-        "Auto: применяется ко всем auto-доменам сразу."
+        "Manual: у хоста дефолт / force вкл / force выкл (цикл кнопкой).\n"
+        "Auto: все auto наследуют Auto-дефолт (если у записи дефолт)."
     )
     return text, settings_menu(suppress_manual=manual, suppress_auto=auto)
 

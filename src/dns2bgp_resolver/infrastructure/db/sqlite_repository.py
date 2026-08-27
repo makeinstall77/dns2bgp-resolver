@@ -58,6 +58,19 @@ def _ensure_aware(dt: datetime | None) -> datetime | None:
     return dt
 
 
+def _normalize_suppress_ipv6(raw: object) -> str:
+    if raw in (None, "", "default"):
+        return "default"
+    if raw in (True, 1, "1", "on", "true", "True"):
+        return "on"
+    if raw in (False, 0, "0", "off", "false", "False"):
+        return "off"
+    text = str(raw).strip().lower()
+    if text in ("default", "on", "off"):
+        return text
+    return "default"
+
+
 def _row_to_domain(row: DomainRow) -> Domain:
     return Domain(
         id=row.id,
@@ -66,7 +79,7 @@ def _row_to_domain(row: DomainRow) -> Domain:
         list_id=row.list_id,
         enabled=row.enabled,
         match_mode=getattr(row, "match_mode", None) or "suffix",  # type: ignore[arg-type]
-        suppress_ipv6=bool(getattr(row, "suppress_ipv6", True)),
+        suppress_ipv6=_normalize_suppress_ipv6(getattr(row, "suppress_ipv6", "default")),  # type: ignore[arg-type]
         created_at=_ensure_aware(row.created_at),
         next_resolve_at=_ensure_aware(row.next_resolve_at),
         last_resolved_at=_ensure_aware(row.last_resolved_at),
@@ -140,6 +153,8 @@ class SqlAlchemyDomainRepository(DomainRepository):
 
     async def initialize(self) -> None:
         async with self._engine.begin() as conn:
+            if conn.dialect.name == "sqlite":
+                await self._configure_sqlite(conn)
             await conn.run_sync(Base.metadata.create_all)
             if conn.dialect.name == "sqlite":
                 result = await conn.execute(text("PRAGMA table_info(domains)"))
@@ -169,11 +184,19 @@ class SqlAlchemyDomainRepository(DomainRepository):
                 if "suppress_ipv6" not in columns:
                     await conn.execute(
                         text(
-                            "ALTER TABLE domains ADD COLUMN suppress_ipv6 BOOLEAN "
-                            "NOT NULL DEFAULT 1"
+                            "ALTER TABLE domains ADD COLUMN suppress_ipv6 VARCHAR(8) "
+                            "NOT NULL DEFAULT 'default'"
                         )
                     )
-                await self._configure_sqlite(conn)
+                else:
+                    await conn.execute(
+                        text(
+                            "UPDATE domains SET suppress_ipv6 = 'default' "
+                            "WHERE typeof(suppress_ipv6) = 'integer' "
+                            "OR lower(CAST(suppress_ipv6 AS TEXT)) "
+                            "NOT IN ('default', 'on', 'off')"
+                        )
+                    )
             elif conn.dialect.name == "postgresql":
                 result = await conn.execute(
                     text(
@@ -211,15 +234,42 @@ class SqlAlchemyDomainRepository(DomainRepository):
                     )
                 result = await conn.execute(
                     text(
-                        "SELECT 1 FROM information_schema.columns "
+                        "SELECT data_type FROM information_schema.columns "
                         "WHERE table_name = 'domains' AND column_name = 'suppress_ipv6'"
                     )
                 )
-                if result.fetchone() is None:
+                col = result.fetchone()
+                if col is None:
                     await conn.execute(
                         text(
-                            "ALTER TABLE domains ADD COLUMN suppress_ipv6 BOOLEAN "
-                            "NOT NULL DEFAULT TRUE"
+                            "ALTER TABLE domains ADD COLUMN suppress_ipv6 VARCHAR(8) "
+                            "NOT NULL DEFAULT 'default'"
+                        )
+                    )
+                elif col[0] == "boolean":
+                    await conn.execute(
+                        text(
+                            "ALTER TABLE domains ALTER COLUMN suppress_ipv6 "
+                            "DROP DEFAULT"
+                        )
+                    )
+                    await conn.execute(
+                        text(
+                            "ALTER TABLE domains ALTER COLUMN suppress_ipv6 "
+                            "TYPE VARCHAR(8) USING 'default'"
+                        )
+                    )
+                    await conn.execute(
+                        text(
+                            "ALTER TABLE domains ALTER COLUMN suppress_ipv6 "
+                            "SET DEFAULT 'default'"
+                        )
+                    )
+                else:
+                    await conn.execute(
+                        text(
+                            "UPDATE domains SET suppress_ipv6 = 'default' "
+                            "WHERE suppress_ipv6 NOT IN ('default', 'on', 'off')"
                         )
                     )
 
@@ -325,8 +375,6 @@ class SqlAlchemyDomainRepository(DomainRepository):
 
             skipped_manual = len(names & manual_names)
             target = names - manual_names
-            _, auto_default = await self.get_suppress_ipv6_defaults()
-            suppress_v = 1 if auto_default else 0
 
             async with self._engine.begin() as conn:
                 if conn.dialect.name == "sqlite":
@@ -359,11 +407,11 @@ class SqlAlchemyDomainRepository(DomainRepository):
                 add_result = await conn.execute(
                     text(
                         "INSERT INTO domains (name, source, list_id, enabled, match_mode, suppress_ipv6) "
-                        "SELECT t.name, 'auto', :list_id, 1, 'suffix', :suppress "
+                        "SELECT t.name, 'auto', :list_id, 1, 'suffix', 'default' "
                         "FROM sync_target t "
                         "WHERE NOT EXISTS (SELECT 1 FROM domains d WHERE d.name = t.name)"
                     ),
-                    {"list_id": list_id, "suppress": suppress_v},
+                    {"list_id": list_id},
                 )
                 added = add_result.rowcount if add_result.rowcount >= 0 else 0
 
@@ -383,8 +431,6 @@ class SqlAlchemyDomainRepository(DomainRepository):
 
             skipped_manual = len(names & manual_names)
             target = names - manual_names
-            _, auto_default = await self.get_suppress_ipv6_defaults()
-            suppress_v = 1 if auto_default else 0
 
             async with self._engine.begin() as conn:
                 if conn.dialect.name == "sqlite":
@@ -416,10 +462,9 @@ class SqlAlchemyDomainRepository(DomainRepository):
                 add_result = await conn.execute(
                     text(
                         "INSERT INTO domains (name, source, enabled, match_mode, suppress_ipv6) "
-                        "SELECT t.name, 'auto', 1, 'suffix', :suppress FROM sync_target t "
+                        "SELECT t.name, 'auto', 1, 'suffix', 'default' FROM sync_target t "
                         "WHERE NOT EXISTS (SELECT 1 FROM domains d WHERE d.name = t.name)"
-                    ),
-                    {"suppress": suppress_v},
+                    )
                 )
                 added = add_result.rowcount if add_result.rowcount >= 0 else 0
 
@@ -657,13 +702,6 @@ class SqlAlchemyDomainRepository(DomainRepository):
 
     async def set_suppress_ipv6_auto_default(self, enabled: bool) -> None:
         await self._set_bool_setting(SUPPRESS_IPV6_AUTO_DEFAULT_KEY, enabled)
-        async with self._session_factory() as session:
-            result = await session.execute(
-                select(DomainRow).where(DomainRow.source == "auto")
-            )
-            for row in result.scalars().all():
-                row.suppress_ipv6 = enabled
-            await session.commit()
 
     async def seed_domain_list(
         self,
@@ -792,20 +830,32 @@ class SqlAlchemyDomainRepository(DomainRepository):
             return [(name, mode or "suffix") for name, mode in result.all()]
 
     async def list_ipv6_suppress_names(self) -> list[str]:
+        from dns2bgp_resolver.domain import resolve_ipv6_suppress
+
+        manual_default, auto_default = await self.get_suppress_ipv6_defaults()
         async with self._session_factory() as session:
             result = await session.execute(
-                select(DomainRow.name)
-                .where(DomainRow.enabled.is_(True))
-                .where(DomainRow.suppress_ipv6.is_(True))
+                select(DomainRow.name, DomainRow.source, DomainRow.suppress_ipv6).where(
+                    DomainRow.enabled.is_(True)
+                )
             )
-            return list(result.scalars().all())
+            names: list[str] = []
+            for name, source, raw_mode in result.all():
+                mode = _normalize_suppress_ipv6(raw_mode)  # type: ignore[arg-type]
+                global_default = manual_default if source == "manual" else auto_default
+                if resolve_ipv6_suppress(mode, global_default=global_default):  # type: ignore[arg-type]
+                    names.append(name)
+            return names
 
-    async def set_suppress_ipv6(self, domain_id: int, suppress: bool) -> Domain | None:
+    async def set_suppress_ipv6(self, domain_id: int, mode: str) -> Domain | None:
+        normalized = _normalize_suppress_ipv6(mode)
+        if normalized not in ("default", "on", "off"):
+            normalized = "default"
         async with self._session_factory() as session:
             row = await session.get(DomainRow, domain_id)
             if row is None:
                 return None
-            row.suppress_ipv6 = suppress
+            row.suppress_ipv6 = normalized
             await session.commit()
             await session.refresh(row)
             return _row_to_domain(row)

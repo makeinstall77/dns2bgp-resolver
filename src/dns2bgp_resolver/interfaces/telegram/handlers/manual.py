@@ -13,7 +13,7 @@ from dns2bgp_resolver.application.commands import (
 )
 from dns2bgp_resolver.application.services.list_parse import format_domains_export
 from dns2bgp_resolver.container import AppContainer
-from dns2bgp_resolver.domain import format_domain_label
+from dns2bgp_resolver.domain import format_domain_label, resolve_ipv6_suppress
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
 from dns2bgp_resolver.interfaces.telegram.keyboards import (
     cancel_inline,
@@ -29,6 +29,11 @@ router = Router()
 
 _PAGE_SIZE = 10
 _CANCEL = cancel_inline("m:domains")
+
+
+async def _manual_default(container: AppContainer) -> bool:
+    manual, _ = await container.repository.get_suppress_ipv6_defaults()
+    return manual
 
 
 async def _render_manual_page(container: AppContainer, page: int) -> tuple[str, object]:
@@ -72,11 +77,18 @@ def _parse_id_page(data: str) -> tuple[int, int] | None:
         return None
 
 
-def _host_text(domain) -> str:
+def _host_text(domain, *, manual_default: bool) -> str:
     mode = getattr(domain, "match_mode", "exact") or "exact"
     label = format_domain_label(str(domain.name), mode)
-    suppress = bool(getattr(domain, "suppress_ipv6", True))
-    v6 = "AAAA выкл (suppress)" if suppress else "AAAA вкл"
+    flag = getattr(domain, "suppress_ipv6", None) or "default"
+    effective = resolve_ipv6_suppress(flag, global_default=manual_default)
+    eff = "AAAA выкл" if effective else "AAAA вкл"
+    if flag == "default":
+        v6 = f"{eff} (дефолт)"
+    elif flag == "on":
+        v6 = "AAAA выкл (force)"
+    else:
+        v6 = "AAAA вкл (force)"
     if mode == "suffix":
         return f"🌐 {label}\nmatch: suffix (поддомены через dnstap)\nIPv6: {v6}"
     ips = ", ".join(str(a.ip) for a in domain.addresses) or "—"
@@ -89,7 +101,7 @@ def _host_menu(domain, page: int):
         domain.id or 0,
         page,
         is_mask=mode == "suffix",
-        suppress_ipv6=bool(getattr(domain, "suppress_ipv6", True)),
+        suppress_ipv6=getattr(domain, "suppress_ipv6", None) or "default",
     )
 
 
@@ -130,7 +142,7 @@ async def cb_host(callback: CallbackQuery, container: AppContainer, ui: BotUi) -
     if callback.message:
         await ui.edit(
             callback.message,
-            _host_text(domain),
+            _host_text(domain, manual_default=await _manual_default(container)),
             reply_markup=_host_menu(domain, page),
         )
     await callback.answer()
@@ -150,10 +162,7 @@ async def cb_toggle_v6(callback: CallbackQuery, container: AppContainer, ui: Bot
     if domain is None or domain.source != "manual":
         await callback.answer("Host not found.", show_alert=True)
         return
-    new_value = not bool(getattr(domain, "suppress_ipv6", True))
-    result = await container.bus.execute(
-        SetSuppressIpv6Command(domain_id=domain_id, suppress=new_value)
-    )
+    result = await container.bus.execute(SetSuppressIpv6Command(domain_id=domain_id))
     if not result.ok or result.data is None:
         await callback.answer(result.error or "Error", show_alert=True)
         return
@@ -161,7 +170,7 @@ async def cb_toggle_v6(callback: CallbackQuery, container: AppContainer, ui: Bot
     if domain and callback.message:
         await ui.edit(
             callback.message,
-            _host_text(domain),
+            _host_text(domain, manual_default=await _manual_default(container)),
             reply_markup=_host_menu(domain, page),
         )
     await callback.answer(result.message or "OK")
@@ -202,7 +211,7 @@ async def cb_refresh(callback: CallbackQuery, container: AppContainer, ui: BotUi
     if domain and callback.message:
         await ui.edit(
             callback.message,
-            _host_text(domain),
+            _host_text(domain, manual_default=await _manual_default(container)),
             reply_markup=_host_menu(domain, page),
         )
     await callback.answer(toast, show_alert=True)

@@ -12,6 +12,22 @@ DomainSource = Literal["manual", "auto"]
 DomainListType = Literal["url", "file"]
 MatchMode = Literal["exact", "suffix"]
 PrefixSource = Literal["static", "passive", "manual"]
+Ipv6SuppressMode = Literal["default", "on", "off"]
+
+
+def resolve_ipv6_suppress(mode: Ipv6SuppressMode, *, global_default: bool) -> bool:
+    """Effective suppress: default inherits global; on/off override."""
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    return global_default
+
+
+def next_ipv6_suppress_mode(mode: Ipv6SuppressMode) -> Ipv6SuppressMode:
+    order: tuple[Ipv6SuppressMode, ...] = ("default", "on", "off")
+    return order[(order.index(mode) + 1) % len(order)]
+
 
 
 _DOMAIN_RE = re.compile(
@@ -205,7 +221,7 @@ class Domain:
     list_id: int | None = None
     enabled: bool = True
     match_mode: MatchMode = "exact"
-    suppress_ipv6: bool = True
+    suppress_ipv6: Ipv6SuppressMode = "default"
     created_at: datetime | None = None
     next_resolve_at: datetime | None = None
     last_resolved_at: datetime | None = None
@@ -219,7 +235,7 @@ class Domain:
         *,
         source: DomainSource = "manual",
         match_mode: MatchMode | None = None,
-        suppress_ipv6: bool = True,
+        suppress_ipv6: Ipv6SuppressMode = "default",
     ) -> Self:
         parsed, mode = parse_domain_input(name)
         return cls(
