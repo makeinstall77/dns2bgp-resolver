@@ -100,6 +100,59 @@ async def test_rebuild_triggers_suppress(repo, tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_suppress_respects_per_domain_flag(repo, tmp_path: Path):
+    path = tmp_path / "list.domains"
+    settings = Ipv6Settings(
+        mode="suppress",
+        dnsdist_list_path=str(path),
+        dnsdist_reload_enable=False,
+    )
+    policy = ModeBasedIpv6Policy(settings)
+    idx = DomainIndex()
+    svc = DomainIndexService(repo, idx, ipv6_policy=policy)
+    d1 = await repo.add(Domain.create("on.test", source="manual", suppress_ipv6=True))
+    d2 = await repo.add(Domain.create("off.test", source="manual", suppress_ipv6=False))
+    await svc.rebuild()
+    text = path.read_text(encoding="utf-8")
+    assert "on.test" in text
+    assert "off.test" not in text
+    await repo.set_suppress_ipv6(d2.id, True)
+    await svc.rebuild()
+    assert "off.test" in path.read_text(encoding="utf-8")
+    assert d1.id is not None
+
+
+@pytest.mark.asyncio
+async def test_suppress_auto_default_bulk(repo, tmp_path: Path):
+    path = tmp_path / "list.domains"
+    settings = Ipv6Settings(
+        mode="suppress",
+        dnsdist_list_path=str(path),
+        dnsdist_reload_enable=False,
+    )
+    policy = ModeBasedIpv6Policy(settings)
+    idx = DomainIndex()
+    svc = DomainIndexService(repo, idx, ipv6_policy=policy)
+    await repo.add(Domain.create("manual.on", source="manual", suppress_ipv6=True))
+    await repo.add(Domain.create("auto.one", source="auto", suppress_ipv6=True))
+    await repo.add(Domain.create("auto.two", source="auto", suppress_ipv6=True))
+    await svc.rebuild()
+    text = path.read_text(encoding="utf-8")
+    assert "manual.on" in text and "auto.one" in text
+
+    await repo.set_suppress_ipv6_auto_default(False)
+    await svc.rebuild()
+    text = path.read_text(encoding="utf-8")
+    assert "manual.on" in text
+    assert "auto.one" not in text
+    assert "auto.two" not in text
+
+    await repo.set_suppress_ipv6_manual_default(False)
+    manual, auto = await repo.get_suppress_ipv6_defaults()
+    assert manual is False and auto is False
+
+
+@pytest.mark.asyncio
 async def test_rebuild_off_skips_export(repo, tmp_path: Path):
     path = tmp_path / "list.domains"
     settings = Ipv6Settings(mode="off", dnsdist_list_path=str(path))

@@ -476,7 +476,7 @@ def create_app(container: AppContainer) -> FastAPI:
         result = await container.bus.execute(ListPrefixesCommand())
         if not result.ok:
             raise HTTPException(status_code=500, detail=result.error)
-        return [p.__dict__ for p in (result.data or [])]
+        return [p.__dict__ for p in (result.data.items if result.data else [])]
 
     @app.post("/api/prefixes", status_code=201)
     async def api_add_prefix(body: PrefixCreate, _: Auth):

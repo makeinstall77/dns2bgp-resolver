@@ -43,6 +43,8 @@ from dns2bgp_resolver.application.commands import (
     GetSettingsHandler,
     SetDefaultSyncIntervalCommand,
     SetDefaultSyncIntervalHandler,
+    SetSuppressIpv6DefaultCommand,
+    SetSuppressIpv6DefaultHandler,
 )
 from dns2bgp_resolver.application.commands.dto import domain_to_view
 from dns2bgp_resolver.application.commands.prefixes import (
@@ -52,6 +54,10 @@ from dns2bgp_resolver.application.commands.prefixes import (
     ListPrefixesHandler,
     RemovePrefixCommand,
     RemovePrefixHandler,
+)
+from dns2bgp_resolver.application.commands.set_suppress_ipv6 import (
+    SetSuppressIpv6Command,
+    SetSuppressIpv6Handler,
 )
 from dns2bgp_resolver.application.ports.clock import SystemClock
 from dns2bgp_resolver.application.ports.repository import DomainRepository
@@ -247,12 +253,17 @@ def build_container(settings: Settings | None = None) -> AppContainer:
     bus.register(ClearDomainListCommand, ClearDomainListHandler(repository, pipeline, index_service))
     bus.register(GetSettingsCommand, GetSettingsHandler(repository))
     bus.register(SetDefaultSyncIntervalCommand, SetDefaultSyncIntervalHandler(repository))
+    bus.register(
+        SetSuppressIpv6DefaultCommand,
+        SetSuppressIpv6DefaultHandler(repository, index_service),
+    )
     bus.register(ListExcludeKeywordsCommand, ListExcludeKeywordsHandler(repository))
     bus.register(AddExcludeKeywordCommand, AddExcludeKeywordHandler(repository))
     bus.register(RemoveExcludeKeywordCommand, RemoveExcludeKeywordHandler(repository))
     bus.register(AddPrefixCommand, AddPrefixHandler(repository, pipeline))
     bus.register(RemovePrefixCommand, RemovePrefixHandler(repository, pipeline))
     bus.register(ListPrefixesCommand, ListPrefixesHandler(repository))
+    bus.register(SetSuppressIpv6Command, SetSuppressIpv6Handler(repository, index_service))
 
     scheduler = RefreshScheduler(pipeline)
     auto_sync_scheduler = AutoListSyncScheduler(

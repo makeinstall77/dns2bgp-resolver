@@ -135,7 +135,7 @@ def prefixes_list(ctx: typer.Context) -> None:
         if not result.ok:
             typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
             raise typer.Exit(1)
-        items = result.data or []
+        items = result.data.items if result.data else []
         if not items:
             typer.echo("(no static prefixes)")
             return
