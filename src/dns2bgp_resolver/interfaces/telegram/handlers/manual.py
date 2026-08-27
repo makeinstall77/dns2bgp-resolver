@@ -82,13 +82,16 @@ def _host_text(domain, *, manual_default: bool) -> str:
     label = format_domain_label(str(domain.name), mode)
     flag = getattr(domain, "suppress_ipv6", None) or "default"
     effective = resolve_ipv6_suppress(flag, global_default=manual_default)
-    eff = "AAAA выкл" if effective else "AAAA вкл"
     if flag == "default":
-        v6 = f"{eff} (дефолт)"
+        v6 = (
+            "AAAA выкл / блокируем (дефолт)"
+            if effective
+            else "AAAA вкл / отдаём (дефолт)"
+        )
     elif flag == "on":
-        v6 = "AAAA выкл (force)"
+        v6 = "AAAA выкл / блокируем"
     else:
-        v6 = "AAAA вкл (force)"
+        v6 = "AAAA вкл / отдаём"
     if mode == "suffix":
         return f"🌐 {label}\nmatch: suffix (поддомены через dnstap)\nIPv6: {v6}"
     ips = ", ".join(str(a.ip) for a in domain.addresses) or "—"
