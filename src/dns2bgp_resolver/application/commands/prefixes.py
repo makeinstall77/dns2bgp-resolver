@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from dns2bgp_resolver.application.commands.dto import CommandResult
@@ -18,6 +19,15 @@ class PrefixView:
 
 
 @dataclass(frozen=True, slots=True)
+class PrefixPageView:
+    items: list[PrefixView]
+    total: int
+    page: int
+    pages: int
+    page_size: int
+
+
+@dataclass(frozen=True, slots=True)
 class AddPrefixCommand:
     cidr: str
     name: str | None = None
@@ -30,7 +40,8 @@ class RemovePrefixCommand:
 
 @dataclass(frozen=True, slots=True)
 class ListPrefixesCommand:
-    pass
+    page: int = 1
+    page_size: int | None = None
 
 
 class AddPrefixHandler:
@@ -77,9 +88,32 @@ class ListPrefixesHandler:
     def __init__(self, repository: DomainRepository) -> None:
         self._repository = repository
 
-    async def handle(self, command: ListPrefixesCommand) -> CommandResult[list[PrefixView]]:
-        items = [
+    async def handle(self, command: ListPrefixesCommand) -> CommandResult[PrefixPageView]:
+        all_items = [
             PrefixView(cidr=p.cidr, name=p.name, enabled=p.enabled, id=p.id)
             for p in await self._repository.list_static_prefixes()
         ]
-        return CommandResult.success(items)
+        total = len(all_items)
+        if command.page_size is None:
+            return CommandResult.success(
+                PrefixPageView(
+                    items=all_items,
+                    total=total,
+                    page=1,
+                    pages=1,
+                    page_size=total or 1,
+                )
+            )
+        page_size = max(1, min(command.page_size, 100))
+        pages = max(1, math.ceil(total / page_size)) if total else 1
+        page = max(1, min(command.page, pages))
+        offset = (page - 1) * page_size
+        return CommandResult.success(
+            PrefixPageView(
+                items=all_items[offset : offset + page_size],
+                total=total,
+                page=page,
+                pages=pages,
+                page_size=page_size,
+            )
+        )

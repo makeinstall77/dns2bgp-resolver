@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 
 from dns2bgp_resolver.application.ports.ipv6_policy import Ipv6Policy
 from dns2bgp_resolver.config import Ipv6Settings
@@ -25,13 +26,23 @@ class ModeBasedIpv6Policy(Ipv6Policy):
         self._settings = settings
         self._exporter = exporter or DnsdistDomainListExporter(settings)
 
-    async def apply(self, index: DomainIndex) -> None:
+    async def apply(
+        self,
+        index: DomainIndex,
+        *,
+        suppress_names: Iterable[str] | None = None,
+    ) -> None:
         mode = self._settings.mode
         try:
             if mode == "off":
                 return
             if mode == "suppress":
-                await self._exporter.export(index.names_snapshot())
+                names = (
+                    frozenset(suppress_names)
+                    if suppress_names is not None
+                    else index.names_snapshot()
+                )
+                await self._exporter.export(names)
                 return
             if mode == "announce":
                 logger.info(

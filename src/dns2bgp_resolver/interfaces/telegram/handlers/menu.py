@@ -13,7 +13,6 @@ from dns2bgp_resolver.interfaces.telegram.keyboards import (
     domains_menu,
     main_menu,
     prefixes_menu,
-    settings_menu,
 )
 from dns2bgp_resolver.interfaces.telegram.handlers import lists as lists_handlers
 from dns2bgp_resolver.interfaces.telegram.handlers import settings as settings_handlers
@@ -117,13 +116,19 @@ async def cb_settings(
     callback: CallbackQuery, container: AppContainer, state: FSMContext, ui: BotUi
 ) -> None:
     await state.clear()
-    text = await settings_handlers.render_settings_summary(container)
+    text, markup = await settings_handlers.render_settings_summary(container)
     if callback.message:
-        await ui.edit(callback.message, text, reply_markup=settings_menu())
+        await ui.edit(callback.message, text, reply_markup=markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "noop")
+async def cb_noop(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
 @router.callback_query(F.data == "m:status")
+@router.callback_query(F.data == "m:status:r")
 async def cb_status(
     callback: CallbackQuery, container: AppContainer, state: FSMContext, ui: BotUi
 ) -> None:
@@ -133,7 +138,11 @@ async def cb_status(
         return
     if callback.message:
         await status_handlers.show_status(callback.message, container, ui, edit=True)
-    await callback.answer()
+    toast = "Обновлено" if (callback.data or "").endswith(":r") else None
+    if toast:
+        await callback.answer(toast)
+    else:
+        await callback.answer()
 
 
 @router.callback_query(F.data == "m:resolve")

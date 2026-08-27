@@ -38,6 +38,7 @@ from dns2bgp_resolver.application.commands.prefixes import (
     AddPrefixHandler,
     ListPrefixesCommand,
     ListPrefixesHandler,
+    PrefixPageView,
     PrefixView,
     RemovePrefixCommand,
     RemovePrefixHandler,
@@ -56,11 +57,17 @@ from dns2bgp_resolver.application.commands.search_auto_domains import (
     SearchAutoDomainsCommand,
     SearchAutoDomainsHandler,
 )
+from dns2bgp_resolver.application.commands.set_suppress_ipv6 import (
+    SetSuppressIpv6Command,
+    SetSuppressIpv6Handler,
+)
 from dns2bgp_resolver.application.commands.settings_cmds import (
     GetSettingsCommand,
     GetSettingsHandler,
     SetDefaultSyncIntervalCommand,
     SetDefaultSyncIntervalHandler,
+    SetSuppressIpv6DefaultCommand,
+    SetSuppressIpv6DefaultHandler,
 )
 from dns2bgp_resolver.application.commands.sync_auto_list import SyncAutoListCommand, SyncAutoListHandler
 
@@ -95,6 +102,7 @@ __all__ = [
     "ListExcludeKeywordsHandler",
     "ListPrefixesCommand",
     "ListPrefixesHandler",
+    "PrefixPageView",
     "PrefixView",
     "RemoveDomainCommand",
     "RemoveDomainHandler",
@@ -111,6 +119,10 @@ __all__ = [
     "SearchAutoDomainsHandler",
     "SetDefaultSyncIntervalCommand",
     "SetDefaultSyncIntervalHandler",
+    "SetSuppressIpv6Command",
+    "SetSuppressIpv6DefaultCommand",
+    "SetSuppressIpv6DefaultHandler",
+    "SetSuppressIpv6Handler",
     "SettingsView",
     "SyncAutoListCommand",
     "SyncAutoListHandler",

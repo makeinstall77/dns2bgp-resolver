@@ -19,7 +19,10 @@ class AddDomainHandler:
 
     async def handle(self, command: AddDomainCommand) -> CommandResult[DomainView]:
         try:
-            domain = Domain.create(command.name, source="manual")
+            manual_default, _ = await self._repository.get_suppress_ipv6_defaults()
+            domain = Domain.create(
+                command.name, source="manual", suppress_ipv6=manual_default
+            )
         except ValueError as exc:
             return CommandResult.failure(str(exc))
 

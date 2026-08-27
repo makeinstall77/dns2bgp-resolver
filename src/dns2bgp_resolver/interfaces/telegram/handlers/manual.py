@@ -9,6 +9,7 @@ from dns2bgp_resolver.application.commands import (
     ListDomainsCommand,
     RemoveDomainCommand,
     ResolveNowCommand,
+    SetSuppressIpv6Command,
 )
 from dns2bgp_resolver.application.services.list_parse import format_domains_export
 from dns2bgp_resolver.container import AppContainer
@@ -74,10 +75,22 @@ def _parse_id_page(data: str) -> tuple[int, int] | None:
 def _host_text(domain) -> str:
     mode = getattr(domain, "match_mode", "exact") or "exact"
     label = format_domain_label(str(domain.name), mode)
+    suppress = bool(getattr(domain, "suppress_ipv6", True))
+    v6 = "AAAA выкл (suppress)" if suppress else "AAAA вкл"
     if mode == "suffix":
-        return f"🌐 {label}\nmatch: suffix (поддомены через dnstap)"
+        return f"🌐 {label}\nmatch: suffix (поддомены через dnstap)\nIPv6: {v6}"
     ips = ", ".join(str(a.ip) for a in domain.addresses) or "—"
-    return f"🌐 {label}\nIP ({len(domain.addresses)}): {ips}"
+    return f"🌐 {label}\nIP ({len(domain.addresses)}): {ips}\nIPv6: {v6}"
+
+
+def _host_menu(domain, page: int):
+    mode = getattr(domain, "match_mode", "exact") or "exact"
+    return manual_host_menu(
+        domain.id or 0,
+        page,
+        is_mask=mode == "suffix",
+        suppress_ipv6=bool(getattr(domain, "suppress_ipv6", True)),
+    )
 
 
 @router.callback_query(F.data == "d:list")
@@ -115,13 +128,43 @@ async def cb_host(callback: CallbackQuery, container: AppContainer, ui: BotUi) -
         await callback.answer("Host not found.", show_alert=True)
         return
     if callback.message:
-        mode = getattr(domain, "match_mode", "exact") or "exact"
         await ui.edit(
             callback.message,
             _host_text(domain),
-            reply_markup=manual_host_menu(domain_id, page, is_mask=mode == "suffix"),
+            reply_markup=_host_menu(domain, page),
         )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("d:v6:"))
+async def cb_toggle_v6(callback: CallbackQuery, container: AppContainer, ui: BotUi) -> None:
+    if not allowed(container, callback.from_user.id if callback.from_user else None):
+        await callback.answer("Access denied.", show_alert=True)
+        return
+    parsed = _parse_id_page(callback.data or "")
+    if parsed is None:
+        await callback.answer("Invalid callback.")
+        return
+    domain_id, page = parsed
+    domain = await container.repository.get_by_id(domain_id)
+    if domain is None or domain.source != "manual":
+        await callback.answer("Host not found.", show_alert=True)
+        return
+    new_value = not bool(getattr(domain, "suppress_ipv6", True))
+    result = await container.bus.execute(
+        SetSuppressIpv6Command(domain_id=domain_id, suppress=new_value)
+    )
+    if not result.ok or result.data is None:
+        await callback.answer(result.error or "Error", show_alert=True)
+        return
+    domain = await container.repository.get_by_id(domain_id)
+    if domain and callback.message:
+        await ui.edit(
+            callback.message,
+            _host_text(domain),
+            reply_markup=_host_menu(domain, page),
+        )
+    await callback.answer(result.message or "OK")
 
 
 @router.callback_query(F.data.startswith("d:rs:"))
@@ -157,11 +200,10 @@ async def cb_refresh(callback: CallbackQuery, container: AppContainer, ui: BotUi
 
     domain = await container.repository.get_by_id(domain_id)
     if domain and callback.message:
-        mode = getattr(domain, "match_mode", "exact") or "exact"
         await ui.edit(
             callback.message,
             _host_text(domain),
-            reply_markup=manual_host_menu(domain_id, page, is_mask=mode == "suffix"),
+            reply_markup=_host_menu(domain, page),
         )
     await callback.answer(toast, show_alert=True)
 

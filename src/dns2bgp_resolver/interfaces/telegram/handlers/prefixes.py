@@ -23,24 +23,40 @@ from dns2bgp_resolver.interfaces.telegram.ui import BotUi
 router = Router()
 
 _CANCEL = cancel_inline("m:prefixes")
+_PAGE_SIZE = 10
+
+
+async def _render_prefix_page(container: AppContainer, page: int) -> tuple[str, object]:
+    result = await container.bus.execute(
+        ListPrefixesCommand(page=page, page_size=_PAGE_SIZE)
+    )
+    if not result.ok or result.data is None:
+        return f"Error: {result.error}", prefixes_menu()
+    data = result.data
+    if not data.items:
+        return (
+            "🛣 Static prefixes: пусто.\nПри экспорте: /32 → /24 → соседние сливаются.",
+            prefixes_menu(),
+        )
+    text = f"🛣 Prefixes — стр. {data.page}/{data.pages} ({data.total})\nнажмите чтобы удалить"
+    items = [(p.cidr, p.name) for p in data.items]
+    return text, prefixes_list_keyboard(items, page=data.page, pages=data.pages)
 
 
 @router.callback_query(F.data == "p:list")
+@router.callback_query(F.data.startswith("p:list:"))
 async def cb_list(callback: CallbackQuery, container: AppContainer, ui: BotUi) -> None:
     if not allowed(container, callback.from_user.id if callback.from_user else None):
         await callback.answer("Access denied.", show_alert=True)
         return
-    result = await container.bus.execute(ListPrefixesCommand())
-    if not result.ok:
-        await callback.answer(result.error or "Error", show_alert=True)
-        return
-    items = [(p.cidr, p.name) for p in (result.data or [])]
-    if not items:
-        text = "🛣 Static prefixes: пусто.\nПри экспорте: /32 → /24 → соседние сливаются."
-        markup = prefixes_menu()
-    else:
-        text = f"🛣 Static prefixes ({len(items)}):\nнажмите чтобы удалить"
-        markup = prefixes_list_keyboard(items)
+    page = 1
+    raw = callback.data or ""
+    if raw.startswith("p:list:"):
+        try:
+            page = int(raw.split(":")[2])
+        except (IndexError, ValueError):
+            page = 1
+    text, markup = await _render_prefix_page(container, page)
     if callback.message:
         await ui.edit(callback.message, text, reply_markup=markup)
     await callback.answer()
@@ -52,10 +68,10 @@ async def cb_export(callback: CallbackQuery, container: AppContainer) -> None:
         await callback.answer("Access denied.", show_alert=True)
         return
     result = await container.bus.execute(ListPrefixesCommand())
-    if not result.ok:
+    if not result.ok or result.data is None:
         await callback.answer(result.error or "Error", show_alert=True)
         return
-    items = [(p.cidr, p.name) for p in (result.data or [])]
+    items = [(p.cidr, p.name) for p in result.data.items]
     text = format_prefixes_export(items)
     if not text:
         await callback.answer("Список пуст.", show_alert=True)
@@ -64,7 +80,7 @@ async def cb_export(callback: CallbackQuery, container: AppContainer) -> None:
         await callback.answer()
         return
     doc = BufferedInputFile(text.encode("utf-8"), filename="prefixes.txt")
-    await callback.message.answer_document(doc, caption=f"Prefixes: {len(items)}")
+    await callback.message.answer_document(doc, caption=f"Prefixes: {result.data.total}")
     await callback.answer()
 
 
@@ -98,19 +114,21 @@ async def cb_remove_ok(callback: CallbackQuery, container: AppContainer, ui: Bot
     if not allowed(container, callback.from_user.id if callback.from_user else None):
         await callback.answer("Access denied.", show_alert=True)
         return
-    cidr = (callback.data or "").split(":", 2)[-1]
+    parts = (callback.data or "").split(":", 3)
+    page = 1
+    if len(parts) >= 4:
+        try:
+            page = int(parts[2])
+        except ValueError:
+            page = 1
+        cidr = parts[3]
+    else:
+        cidr = parts[-1]
     result = await container.bus.execute(RemovePrefixCommand(cidr=cidr))
     if not result.ok:
         await callback.answer(result.error or "Error", show_alert=True)
         return
-    listed = await container.bus.execute(ListPrefixesCommand())
-    items = [(p.cidr, p.name) for p in (listed.data or [])]
-    if not items:
-        text = "🛣 Static prefixes: пусто."
-        markup = prefixes_menu()
-    else:
-        text = f"🛣 Static prefixes ({len(items)}):\nнажмите чтобы удалить"
-        markup = prefixes_list_keyboard(items)
+    text, markup = await _render_prefix_page(container, page)
     if callback.message:
         await ui.edit(callback.message, text, reply_markup=markup)
     await callback.answer(result.message or "Removed")

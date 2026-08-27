@@ -15,7 +15,7 @@ from dns2bgp_resolver.application.services.service_status import (
 )
 from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
-from dns2bgp_resolver.interfaces.telegram.keyboards import back_inline
+from dns2bgp_resolver.interfaces.telegram.keyboards import status_keyboard
 from dns2bgp_resolver.interfaces.telegram.ui import BotUi
 
 router = Router()
@@ -63,7 +63,7 @@ async def _live_update(
             chat_id,
             message_id,
             text,
-            reply_markup=back_inline(),
+            reply_markup=status_keyboard(),
             if_generation=generation,
         )
         if not ok or left <= 0:
@@ -77,9 +77,9 @@ async def show_status(
         return
     text = await _render(container, live_left_sec=_LIVE_SECONDS)
     if edit:
-        msg = await ui.edit(message, text, reply_markup=back_inline())
+        msg = await ui.edit(message, text, reply_markup=status_keyboard())
     else:
-        msg = await ui.reply(message, text, reply_markup=back_inline())
+        msg = await ui.reply(message, text, reply_markup=status_keyboard())
     gen = ui.generation(message.chat.id)
     asyncio.create_task(
         _live_update(
