@@ -76,12 +76,11 @@ class Ipv6Settings(BaseModel):
     mode: Literal["off", "suppress", "announce"] = "off"
     dnsdist_list_path: str = "./data/aaaa-suppress.domains"
     dnsdist_reload_enable: bool = False
+    # If set, @KEY@ in dnsdist_reload_cmd is replaced with file contents.
+    dnsdist_console_key_file: str = "/etc/dns2bgp/dnsdist.key"
     dnsdist_reload_cmd: list[str] = Field(
         default_factory=lambda: [
-            "dnsdist",
-            "-c",
-            "127.0.0.1:5199",
-            "reloadDns2bgpDomains()",
+            "/usr/lib/dns2bgp/reload-dnsdist.sh",
         ]
     )
 

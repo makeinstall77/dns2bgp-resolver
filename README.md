@@ -202,12 +202,12 @@ ipv6:
   mode: suppress   # off | suppress | announce
   dnsdist_list_path: "/var/lib/dns2bgp/aaaa-suppress.domains"
   dnsdist_reload_enable: true
+  dnsdist_console_key_file: "/etc/dns2bgp/dnsdist.key"
   dnsdist_reload_cmd:
-    - dnsdist
-    - "-c"
-    - "127.0.0.1:5199"
-    - "reloadDns2bgpDomains()"
+    - /usr/lib/dns2bgp/reload-dnsdist.sh
 ```
+
+Put the dnsdist console key in `/etc/dns2bgp/dnsdist.key` (readable by `dns2bgp`). On package install: helper script + `dns2bgp.service` `ExecStartPost` + `dnsdist.service.d` `ExecReload` so list changes and systemd restarts refresh the in-memory SuffixMatchNode.
 
 - **`off`** — no IPv6 policy (default).
 - **`suppress`** — after each DomainIndex rebuild, write the domain list and best-effort reload dnsdist. Put dnsdist in front of unbound; AAAA (and preferably HTTPS/SVCB) for matched names → NODATA. Example: [deploy/dnsdist.example.conf](deploy/dnsdist.example.conf).

@@ -8,6 +8,7 @@ from typing import Optional
 import uvicorn
 
 from dns2bgp_resolver.container import AppContainer
+from dns2bgp_resolver.infrastructure.systemd_util import sd_notify
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,8 @@ async def run_services(
     enable_web: bool = True,
     enable_telegram: bool = True,
 ) -> None:
+    # startup() already rebuilt index / wrote aaaa-suppress + reloaded dnsdist
+    sd_notify("READY=1")
     await container.scheduler.start()
     if container.settings.auto_list.enabled:
         await container.auto_sync_scheduler.start()
