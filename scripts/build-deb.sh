@@ -73,7 +73,9 @@ echo "==> Preparing staging (${STAGING})"
 mkdir -p \
     "${STAGING}/opt/dns2bgp" \
     "${STAGING}/etc/dns2bgp" \
+    "${STAGING}/usr/lib/dns2bgp" \
     "${STAGING}/lib/systemd/system" \
+    "${STAGING}/lib/systemd/system/dnsdist.service.d" \
     "${STAGING}/usr/share/doc/${PKG_NAME}" \
     "${STAGING}/DEBIAN"
 
@@ -84,6 +86,11 @@ sed -i '1s|.*|#!/opt/dns2bgp/.venv/bin/python3|' "${STAGING}/opt/dns2bgp/.venv/b
 
 install -m 0644 "${ROOT}/deploy/config.yaml" "${STAGING}/etc/dns2bgp/config.yaml"
 install -m 0644 "${ROOT}/deploy/dns2bgp.service" "${STAGING}/lib/systemd/system/dns2bgp.service"
+install -m 0755 "${ROOT}/deploy/reload-dnsdist.sh" "${STAGING}/usr/lib/dns2bgp/reload-dnsdist.sh"
+install -m 0644 "${ROOT}/deploy/dnsdist-reload.conf" \
+    "${STAGING}/lib/systemd/system/dnsdist.service.d/dns2bgp-reload.conf"
+install -m 0644 "${ROOT}/deploy/dnsdist.example.conf" \
+    "${STAGING}/usr/share/doc/${PKG_NAME}/dnsdist.example.conf"
 install -m 0644 "${ROOT}/deploy/bird.include.example.conf" "${STAGING}/usr/share/doc/${PKG_NAME}/bird.include.example.conf"
 install -m 0755 "${ROOT}/packaging/deb/DEBIAN/postinst" "${STAGING}/DEBIAN/postinst"
 install -m 0755 "${ROOT}/packaging/deb/DEBIAN/prerm" "${STAGING}/DEBIAN/prerm"

@@ -1,16 +1,21 @@
 [Unit]
 Description=dns2bgp-resolver (DNS → BGP pool for VPN steering)
-After=network-online.target
-Wants=network-online.target
+After=network-online.target dnsdist.service
+Wants=network-online.target dnsdist.service
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
 User=dns2bgp
 Group=dns2bgp
 WorkingDirectory=/var/lib/dns2bgp
 ExecStart=/opt/dns2bgp/.venv/bin/dns2bgp --config /etc/dns2bgp/config.yaml serve
+# Belt-and-suspenders: reload dnsdist after READY (list already written + reloaded in-process).
+# '+' = root; '-' = ignore failure (dnsdist may be down briefly)
+ExecStartPost=-+/usr/lib/dns2bgp/reload-dnsdist.sh
 Restart=on-failure
 RestartSec=5
+TimeoutStartSec=120
 # Bird include file should live on disk bird can read independently of this unit.
 
 [Install]
