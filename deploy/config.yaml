@@ -43,9 +43,7 @@ dnstap:
 ipv6:
   mode: off
   dnsdist_list_path: "/var/lib/dns2bgp/aaaa-suppress.domains"
-  dnsdist_reload_enable: false
+  dnsdist_reload_enable: true
+  dnsdist_console_key_file: "/etc/dns2bgp/dnsdist.key"
   dnsdist_reload_cmd:
-    - dnsdist
-    - "-c"
-    - "127.0.0.1:5199"
-    - "reloadDns2bgpDomains()"
+    - /usr/lib/dns2bgp/reload-dnsdist.sh
