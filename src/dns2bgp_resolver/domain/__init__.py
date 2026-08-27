@@ -16,7 +16,7 @@ Ipv6SuppressMode = Literal["default", "on", "off"]
 
 
 def resolve_ipv6_suppress(mode: Ipv6SuppressMode, *, global_default: bool) -> bool:
-    """Effective suppress: default inherits global; on/off override."""
+    """Effective suppress (block AAAA): default inherits global; on/off override."""
     if mode == "on":
         return True
     if mode == "off":
@@ -25,8 +25,45 @@ def resolve_ipv6_suppress(mode: Ipv6SuppressMode, *, global_default: bool) -> bo
 
 
 def next_ipv6_suppress_mode(mode: Ipv6SuppressMode) -> Ipv6SuppressMode:
-    order: tuple[Ipv6SuppressMode, ...] = ("default", "on", "off")
+    """Cycle: default → AAAA вкл (off) → AAAA выкл (on) → default."""
+    order: tuple[Ipv6SuppressMode, ...] = ("default", "off", "on")
     return order[(order.index(mode) + 1) % len(order)]
+
+
+def suffix_match_covers(listed: str, qname: str) -> bool:
+    """dnsdist SuffixMatchNode: listed matches qname or any subdomain of listed."""
+    return qname == listed or qname.endswith("." + listed)
+
+
+def filter_suppress_names_manual_priority(
+    *,
+    suppress_names: Iterable[tuple[str, str]],
+    manual_allow_names: Iterable[str],
+) -> list[str]:
+    """
+    Build final dnsdist suppress list.
+
+    Manual AAAA-allow names win: drop any auto suppress entry that would
+    SuffixMatch-cover them (or sit under their suffix tree).
+    Manual suppress entries are always kept.
+    """
+    allows = {n.strip(".").lower() for n in manual_allow_names if n}
+    result: list[str] = []
+    for raw_name, source in suppress_names:
+        name = raw_name.strip(".").lower()
+        if not name:
+            continue
+        if source == "manual":
+            result.append(name)
+            continue
+        drop = False
+        for allow in allows:
+            if suffix_match_covers(name, allow) or suffix_match_covers(allow, name):
+                drop = True
+                break
+        if not drop:
+            result.append(name)
+    return result
 
 
 

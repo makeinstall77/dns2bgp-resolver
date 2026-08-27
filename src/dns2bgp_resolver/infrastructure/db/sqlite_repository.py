@@ -830,7 +830,10 @@ class SqlAlchemyDomainRepository(DomainRepository):
             return [(name, mode or "suffix") for name, mode in result.all()]
 
     async def list_ipv6_suppress_names(self) -> list[str]:
-        from dns2bgp_resolver.domain import resolve_ipv6_suppress
+        from dns2bgp_resolver.domain import (
+            filter_suppress_names_manual_priority,
+            resolve_ipv6_suppress,
+        )
 
         manual_default, auto_default = await self.get_suppress_ipv6_defaults()
         async with self._session_factory() as session:
@@ -839,13 +842,20 @@ class SqlAlchemyDomainRepository(DomainRepository):
                     DomainRow.enabled.is_(True)
                 )
             )
-            names: list[str] = []
+            suppress_pairs: list[tuple[str, str]] = []
+            manual_allow: list[str] = []
             for name, source, raw_mode in result.all():
                 mode = _normalize_suppress_ipv6(raw_mode)  # type: ignore[arg-type]
                 global_default = manual_default if source == "manual" else auto_default
-                if resolve_ipv6_suppress(mode, global_default=global_default):  # type: ignore[arg-type]
-                    names.append(name)
-            return names
+                suppress = resolve_ipv6_suppress(mode, global_default=global_default)  # type: ignore[arg-type]
+                if source == "manual" and not suppress:
+                    manual_allow.append(name)
+                if suppress:
+                    suppress_pairs.append((name, source))
+            return filter_suppress_names_manual_priority(
+                suppress_names=suppress_pairs,
+                manual_allow_names=manual_allow,
+            )
 
     async def set_suppress_ipv6(self, domain_id: int, mode: str) -> Domain | None:
         normalized = _normalize_suppress_ipv6(mode)

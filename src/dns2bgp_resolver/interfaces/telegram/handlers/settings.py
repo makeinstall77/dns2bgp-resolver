@@ -33,14 +33,21 @@ async def render_settings_summary(container: AppContainer) -> tuple[str, object]
     )
     auto = settings.data.suppress_ipv6_auto_default if settings.data else True
     mode = container.settings.ipv6.mode
+
+    def aaaa_state(suppress: bool) -> str:
+        return "выкл (блокируем)" if suppress else "вкл (отдаём)"
+
     text = (
         "Settings\n"
         f"Default sync interval: {interval}s\n"
         f"ipv6.mode (config): {mode}\n"
-        f"AAAA suppress default — Manual: {'ON' if manual else 'OFF'}, "
-        f"Auto: {'ON' if auto else 'OFF'}\n"
-        "Manual: у хоста дефолт / force вкл / force выкл (цикл кнопкой).\n"
-        "Auto: все auto наследуют Auto-дефолт (если у записи дефолт)."
+        "\n"
+        "AAAA: вкл = отдаём записи, выкл = блокируем\n"
+        f"• Manual default: {aaaa_state(manual)}\n"
+        f"• Auto default: {aaaa_state(auto)}\n"
+        "\n"
+        "У manual-хоста: дефолт → вкл → выкл (цикл).\n"
+        "Manual всегда приоритетнее Auto (даже при «дефолт»)."
     )
     return text, settings_menu(suppress_manual=manual, suppress_auto=auto)
 
