@@ -75,3 +75,8 @@ class DomainIndex:
         n = normalize_qname(name)
         with self._lock:
             return n in self._exact or n in self._suffix
+
+    def names_snapshot(self) -> frozenset[str]:
+        """All indexed names (exact ∪ suffix) for policy exporters."""
+        with self._lock:
+            return self._exact | self._suffix

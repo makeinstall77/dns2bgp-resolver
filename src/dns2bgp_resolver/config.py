@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -66,6 +66,26 @@ class DnstapSettings(BaseModel):
     socket_mode: int = 0o666
 
 
+class Ipv6Settings(BaseModel):
+    """
+    off — IPv4 pool only (default).
+    suppress — export DomainIndex for dnsdist AAAA NODATA (VPN is IPv4-only).
+    announce — future: collect AAAA and export Bird IPv6 (stub for now).
+    """
+
+    mode: Literal["off", "suppress", "announce"] = "off"
+    dnsdist_list_path: str = "./data/aaaa-suppress.domains"
+    dnsdist_reload_enable: bool = False
+    dnsdist_reload_cmd: list[str] = Field(
+        default_factory=lambda: [
+            "dnsdist",
+            "-c",
+            "127.0.0.1:5199",
+            "reloadDns2bgpDomains()",
+        ]
+    )
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="DNS2BGP_",
@@ -81,6 +101,7 @@ class Settings(BaseSettings):
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)
     auto_list: AutoListSettings = Field(default_factory=AutoListSettings)
     dnstap: DnstapSettings = Field(default_factory=DnstapSettings)
+    ipv6: Ipv6Settings = Field(default_factory=Ipv6Settings)
 
     @classmethod
     def load(cls, config_path: str | Path | None = None) -> Settings:

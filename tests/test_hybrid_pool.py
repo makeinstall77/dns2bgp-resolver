@@ -134,12 +134,13 @@ async def test_passive_hit_export(repo, tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_index_rebuild_from_repo(repo):
-    await repo.add(Domain.create("a.example", source="auto"))
+    await repo.add(Domain.create("a.example", source="auto", match_mode="suffix"))
     await repo.add(Domain.create("b.example", source="manual"))
     svc = DomainIndexService(repo, DomainIndex())
     size = await svc.rebuild()
     assert size == 2
     assert svc.index.matches("x.a.example") == "a.example"
+    assert svc.index.matches("x.b.example") is None
 
 
 def _encode_varint(value: int) -> bytes:
