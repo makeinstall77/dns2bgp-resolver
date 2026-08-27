@@ -55,6 +55,9 @@ class DomainRow(Base):
     match_mode: Mapped[str] = mapped_column(
         String(16), nullable=False, default="suffix", server_default="suffix"
     )
+    suppress_ipv6: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="1"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

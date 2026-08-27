@@ -45,6 +45,17 @@ def back_inline() -> InlineKeyboardMarkup:
     )
 
 
+def status_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🔄 Обновить", callback_data="m:status:r"),
+                InlineKeyboardButton(text="◀ Назад", callback_data="m:main"),
+            ]
+        ]
+    )
+
+
 def domains_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -76,7 +87,7 @@ def prefixes_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="📋 List", callback_data="p:list"),
+                InlineKeyboardButton(text="📋 List", callback_data="p:list:1"),
                 InlineKeyboardButton(text="➕ Add", callback_data="p:add"),
                 InlineKeyboardButton(text="🗑 Remove", callback_data="p:rm"),
             ],
@@ -86,14 +97,44 @@ def prefixes_menu() -> InlineKeyboardMarkup:
     )
 
 
-def prefixes_list_keyboard(items: list[tuple[str, str | None]]) -> InlineKeyboardMarkup:
+def _page_nav_row(*, prev_data: str, next_data: str, page: int, pages: int) -> list[InlineKeyboardButton]:
+    """Always one horizontal row: ◀  N/M  ▶ (noop stubs at edges)."""
+    prev = (
+        InlineKeyboardButton(text="◀", callback_data=prev_data)
+        if page > 1
+        else InlineKeyboardButton(text="·", callback_data="noop")
+    )
+    nxt = (
+        InlineKeyboardButton(text="▶", callback_data=next_data)
+        if page < pages
+        else InlineKeyboardButton(text="·", callback_data="noop")
+    )
+    mid = InlineKeyboardButton(text=f"{page}/{pages}", callback_data="noop")
+    return [prev, mid, nxt]
+
+
+def prefixes_list_keyboard(
+    items: list[tuple[str, str | None]],
+    *,
+    page: int,
+    pages: int,
+) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    for cidr, name in items[:30]:
+    for cidr, name in items:
         label = f"{cidr}" if not name else f"{cidr} ({name})"
         if len(label) > 64:
             label = label[:61] + "…"
         rows.append(
-            [InlineKeyboardButton(text=f"🗑 {label}", callback_data=f"p:rmok:{cidr}")]
+            [InlineKeyboardButton(text=f"🗑 {label}", callback_data=f"p:rmok:{page}:{cidr}")]
+        )
+    if pages > 1:
+        rows.append(
+            _page_nav_row(
+                prev_data=f"p:list:{page - 1}",
+                next_data=f"p:list:{page + 1}",
+                page=page,
+                pages=pages,
+            )
         )
     rows.append(
         [
@@ -131,25 +172,31 @@ def host_list_keyboard(
             cb = f"{prefix}:h:{domain_id}:{page}"
         rows.append([InlineKeyboardButton(text=label, callback_data=cb)])
 
-    nav: list[InlineKeyboardButton] = []
-    if query_key is not None:
-        prev_data = f"s:{page - 1}:{query_key}"
-        next_data = f"s:{page + 1}:{query_key}"
-    else:
-        prev_data = f"{prefix}:list:{page - 1}"
-        next_data = f"{prefix}:list:{page + 1}"
-    if page > 1:
-        nav.append(InlineKeyboardButton(text="◀", callback_data=prev_data))
-    if page < pages:
-        nav.append(InlineKeyboardButton(text="▶", callback_data=next_data))
-    if nav:
-        rows.append(nav)
+    if pages > 1:
+        if query_key is not None:
+            prev_data = f"s:{page - 1}:{query_key}"
+            next_data = f"s:{page + 1}:{query_key}"
+        else:
+            prev_data = f"{prefix}:list:{page - 1}"
+            next_data = f"{prefix}:list:{page + 1}"
+        rows.append(
+            _page_nav_row(
+                prev_data=prev_data,
+                next_data=next_data,
+                page=page,
+                pages=pages,
+            )
+        )
     rows.append([InlineKeyboardButton(text="◀ Назад", callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def manual_host_menu(
-    domain_id: int, page: int, *, is_mask: bool = False
+    domain_id: int,
+    page: int,
+    *,
+    is_mask: bool = False,
+    suppress_ipv6: bool = True,
 ) -> InlineKeyboardMarkup:
     actions: list[InlineKeyboardButton] = []
     if not is_mask:
@@ -163,9 +210,15 @@ def manual_host_menu(
             text="🗑 Удалить", callback_data=f"d:rmid:{domain_id}:{page}"
         )
     )
+    v6_label = "🚫 AAAA выкл" if suppress_ipv6 else "✅ AAAA вкл"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             actions,
+            [
+                InlineKeyboardButton(
+                    text=v6_label, callback_data=f"d:v6:{domain_id}:{page}"
+                )
+            ],
             [InlineKeyboardButton(text="◀ К списку", callback_data=f"d:list:{page}")],
         ]
     )
@@ -257,10 +310,22 @@ def confirm_menu(action: str, list_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def settings_menu() -> InlineKeyboardMarkup:
+def settings_menu(
+    *,
+    suppress_manual: bool = True,
+    suppress_auto: bool = True,
+) -> InlineKeyboardMarkup:
+    manual_label = (
+        "🚫 Manual AAAA: выкл" if suppress_manual else "✅ Manual AAAA: вкл"
+    )
+    auto_label = "🚫 Auto AAAA: выкл" if suppress_auto else "✅ Auto AAAA: вкл"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="⏱ Default interval", callback_data="st:interval")],
+            [
+                InlineKeyboardButton(text=manual_label, callback_data="st:v6:manual"),
+                InlineKeyboardButton(text=auto_label, callback_data="st:v6:auto"),
+            ],
             [InlineKeyboardButton(text="🏷 Exclude keywords", callback_data="st:filters")],
             [InlineKeyboardButton(text="◀ Назад", callback_data="m:main")],
         ]
@@ -281,15 +346,15 @@ def filters_menu(keywords: list[str], *, back_callback: str = "m:auto") -> Inlin
 
 
 def search_keyboard(query_key: str, page: int, pages: int) -> InlineKeyboardMarkup:
-    buttons: list[InlineKeyboardButton] = []
-    if page > 1:
-        buttons.append(
-            InlineKeyboardButton(text="◀", callback_data=f"s:{page - 1}:{query_key}")
+    rows: list[list[InlineKeyboardButton]] = []
+    if pages > 1:
+        rows.append(
+            _page_nav_row(
+                prev_data=f"s:{page - 1}:{query_key}",
+                next_data=f"s:{page + 1}:{query_key}",
+                page=page,
+                pages=pages,
+            )
         )
-    if page < pages:
-        buttons.append(
-            InlineKeyboardButton(text="▶", callback_data=f"s:{page + 1}:{query_key}")
-        )
-    nav = [buttons] if buttons else []
-    nav.append([InlineKeyboardButton(text="◀ Auto", callback_data="m:auto")])
-    return InlineKeyboardMarkup(inline_keyboard=nav)
+    rows.append([InlineKeyboardButton(text="◀ Auto", callback_data="m:auto")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

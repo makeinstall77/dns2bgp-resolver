@@ -8,11 +8,14 @@ from dns2bgp_resolver.application.commands import (
     GetSettingsCommand,
     ListExcludeKeywordsCommand,
     SetDefaultSyncIntervalCommand,
+    SetSuppressIpv6DefaultCommand,
 )
 from dns2bgp_resolver.container import AppContainer
+from dns2bgp_resolver.interfaces.telegram.auth import allowed
 from dns2bgp_resolver.interfaces.telegram.keyboards import (
     cancel_inline,
     filters_menu,
+    settings_menu,
 )
 from dns2bgp_resolver.interfaces.telegram.states import SetGlobalInterval
 from dns2bgp_resolver.interfaces.telegram.ui import BotUi
@@ -22,10 +25,24 @@ router = Router()
 _CANCEL = cancel_inline("m:settings")
 
 
-async def render_settings_summary(container: AppContainer) -> str:
+async def render_settings_summary(container: AppContainer) -> tuple[str, object]:
     settings = await container.bus.execute(GetSettingsCommand())
     interval = settings.data.default_sync_interval if settings.data else 86400
-    return f"Settings\nDefault sync interval: {interval}s"
+    manual = (
+        settings.data.suppress_ipv6_manual_default if settings.data else True
+    )
+    auto = settings.data.suppress_ipv6_auto_default if settings.data else True
+    mode = container.settings.ipv6.mode
+    text = (
+        "Settings\n"
+        f"Default sync interval: {interval}s\n"
+        f"ipv6.mode (config): {mode}\n"
+        f"AAAA suppress default — Manual: {'ON' if manual else 'OFF'}, "
+        f"Auto: {'ON' if auto else 'OFF'}\n"
+        "Manual: дефолт для новых доменов (у элемента можно переопределить).\n"
+        "Auto: применяется ко всем auto-доменам сразу."
+    )
+    return text, settings_menu(suppress_manual=manual, suppress_auto=auto)
 
 
 @router.callback_query(F.data == "st:interval")
@@ -58,6 +75,35 @@ async def set_global_interval(
         f"{result.message or 'Updated.'}\nЕщё interval или ◀ Отмена:",
         reply_markup=_CANCEL,
     )
+
+
+@router.callback_query(F.data.in_({"st:v6:manual", "st:v6:auto"}))
+async def cb_toggle_v6_default(
+    callback: CallbackQuery, container: AppContainer, ui: BotUi
+) -> None:
+    if not allowed(container, callback.from_user.id if callback.from_user else None):
+        await callback.answer("Access denied.", show_alert=True)
+        return
+    scope = "manual" if (callback.data or "").endswith(":manual") else "auto"
+    settings = await container.bus.execute(GetSettingsCommand())
+    if settings.data is None:
+        await callback.answer("Error", show_alert=True)
+        return
+    current = (
+        settings.data.suppress_ipv6_manual_default
+        if scope == "manual"
+        else settings.data.suppress_ipv6_auto_default
+    )
+    result = await container.bus.execute(
+        SetSuppressIpv6DefaultCommand(scope=scope, enabled=not current)
+    )
+    if not result.ok:
+        await callback.answer(result.error or "Error", show_alert=True)
+        return
+    text, markup = await render_settings_summary(container)
+    if callback.message:
+        await ui.edit(callback.message, text, reply_markup=markup)
+    await callback.answer(result.message or "OK")
 
 
 @router.callback_query(F.data == "st:filters")
