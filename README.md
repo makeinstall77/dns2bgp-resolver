@@ -195,7 +195,35 @@ No changes to the command layer — same `DomainRepository` port.
 
 ## IPv6
 
-MVP is IPv4/`A` only. Address rows already store `family`; enabling `AAAA` later is a DNS resolver + export extension, not a redesign.
+BGP pool remains IPv4/`A` only. Dual-stack sites prefer AAAA and bypass the VPN — use **suppress** so clients never get AAAA for listed domains.
+
+```yaml
+ipv6:
+  mode: suppress   # off | suppress | announce
+  dnsdist_list_path: "/var/lib/dns2bgp/aaaa-suppress.domains"
+  dnsdist_reload_enable: true
+  dnsdist_reload_cmd:
+    - dnsdist
+    - "-c"
+    - "127.0.0.1:5199"
+    - "reloadDns2bgpDomains()"
+```
+
+- **`off`** — no IPv6 policy (default).
+- **`suppress`** — after each DomainIndex rebuild, write the domain list and best-effort reload dnsdist. Put dnsdist in front of unbound; AAAA (and preferably HTTPS/SVCB) for matched names → NODATA. Example: [deploy/dnsdist.example.conf](deploy/dnsdist.example.conf).
+- **`announce`** — stub for later: collect AAAA and export Bird IPv6 when the VPN supports it. Same DomainIndex; no dnsdist suppress.
+
+Check:
+
+```bash
+dig AAAA matched.example @127.0.0.1 -p 5353   # NOERROR, 0 answers
+dig A matched.example @127.0.0.1 -p 5353      # normal A via unbound
+dig AAAA other.example @127.0.0.1 -p 5353     # real AAAA (good IPv6 path)
+```
+
+Static IPv4 prefixes without a domain are not covered by suppress.
+
+Address rows already store `family`; full `announce` is a DNS/dnstap + Bird `ipv6` extension later.
 
 ## Tests
 

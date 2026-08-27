@@ -38,3 +38,14 @@ dnstap:
   enabled: false
   listen_unix: "/var/lib/dns2bgp/dnstap.sock"
   socket_mode: 438
+
+# IPv6: off | suppress | announce — see deploy/dnsdist.example.conf
+ipv6:
+  mode: off
+  dnsdist_list_path: "/var/lib/dns2bgp/aaaa-suppress.domains"
+  dnsdist_reload_enable: false
+  dnsdist_reload_cmd:
+    - dnsdist
+    - "-c"
+    - "127.0.0.1:5199"
+    - "reloadDns2bgpDomains()"
