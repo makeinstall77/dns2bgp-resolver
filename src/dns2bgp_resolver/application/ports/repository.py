@@ -205,7 +205,7 @@ class DomainRepository(ABC):
 
     @abstractmethod
     async def set_suppress_ipv6_auto_default(self, enabled: bool) -> None:
-        """Set auto default and apply to all auto domains."""
+        """Set auto default (hosts with mode=default inherit this)."""
 
     @abstractmethod
     async def list_exclude_keywords(self) -> list[str]:
@@ -236,8 +236,8 @@ class DomainRepository(ABC):
         """Enabled domain names that should suppress AAAA (dnsdist export)."""
 
     @abstractmethod
-    async def set_suppress_ipv6(self, domain_id: int, suppress: bool) -> Domain | None:
-        """Update suppress_ipv6 for a domain. Return None if missing."""
+    async def set_suppress_ipv6(self, domain_id: int, mode: str) -> Domain | None:
+        """Set suppress mode: default | on | off. Return None if missing."""
 
     @abstractmethod
     async def replace_addresses(

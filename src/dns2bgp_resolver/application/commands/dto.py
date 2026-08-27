@@ -30,7 +30,7 @@ class DomainView:
     id: int | None = None
     source: str = "manual"
     match_mode: str = "exact"
-    suppress_ipv6: bool = True
+    suppress_ipv6: str = "default"
     addresses: list[str] = field(default_factory=list)
     next_resolve_at: str | None = None
     last_resolved_at: str | None = None
@@ -113,7 +113,7 @@ def domain_to_view(domain: Any) -> DomainView:
         id=domain.id,
         source=domain.source,
         match_mode=getattr(domain, "match_mode", None) or "exact",
-        suppress_ipv6=bool(getattr(domain, "suppress_ipv6", True)),
+        suppress_ipv6=getattr(domain, "suppress_ipv6", None) or "default",
         addresses=[str(a.ip) for a in domain.addresses],
         next_resolve_at=domain.next_resolve_at.isoformat() if domain.next_resolve_at else None,
         last_resolved_at=domain.last_resolved_at.isoformat() if domain.last_resolved_at else None,
