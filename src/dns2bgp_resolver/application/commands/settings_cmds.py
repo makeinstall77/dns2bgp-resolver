@@ -78,8 +78,8 @@ class SetSuppressIpv6DefaultHandler:
             await self._index_service.rebuild()
         view = await _load_settings(self._repository)
         label = "Manual" if command.scope == "manual" else "Auto"
-        state = "вкл" if command.enabled else "выкл"
-        return CommandResult.success(
-            view,
-            message=f"{label} AAAA suppress: {state}",
-        )
+        if command.enabled:
+            msg = f"{label} AAAA: выкл (блокируем)"
+        else:
+            msg = f"{label} AAAA: вкл (отдаём)"
+        return CommandResult.success(view, message=msg)

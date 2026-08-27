@@ -36,7 +36,11 @@ class SetSuppressIpv6Handler:
             return CommandResult.failure("domain not found")
         if self._index_service is not None:
             await self._index_service.rebuild()
-        labels = {"default": "дефолт", "on": "выкл (force)", "off": "вкл (force)"}
+        labels = {
+            "default": "дефолт",
+            "on": "выкл (блокируем)",
+            "off": "вкл (отдаём)",
+        }
         return CommandResult.success(
             domain_to_view(updated),
             message=f"AAAA: {labels.get(updated.suppress_ipv6, updated.suppress_ipv6)}",

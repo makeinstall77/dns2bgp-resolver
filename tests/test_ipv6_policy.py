@@ -32,9 +32,25 @@ def test_resolve_and_cycle():
     assert resolve_ipv6_suppress("default", global_default=False) is False
     assert resolve_ipv6_suppress("on", global_default=False) is True
     assert resolve_ipv6_suppress("off", global_default=True) is False
-    assert next_ipv6_suppress_mode("default") == "on"
-    assert next_ipv6_suppress_mode("on") == "off"
-    assert next_ipv6_suppress_mode("off") == "default"
+    assert next_ipv6_suppress_mode("default") == "off"
+    assert next_ipv6_suppress_mode("off") == "on"
+    assert next_ipv6_suppress_mode("on") == "default"
+
+
+def test_manual_priority_filters_auto_parent():
+    from dns2bgp_resolver.domain import filter_suppress_names_manual_priority
+
+    out = filter_suppress_names_manual_priority(
+        suppress_names=[
+            ("googlevideo.com", "auto"),
+            ("other.com", "auto"),
+            ("force.block", "manual"),
+        ],
+        manual_allow_names=["redirector.googlevideo.com"],
+    )
+    assert "googlevideo.com" not in out
+    assert "other.com" in out
+    assert "force.block" in out
 
 
 @pytest.mark.asyncio
@@ -174,6 +190,29 @@ async def test_suppress_auto_default_inherit(repo, tmp_path: Path):
     assert "manual.on" in text
     assert "auto.one" not in text
     assert "auto.two" not in text
+
+
+@pytest.mark.asyncio
+async def test_manual_allow_beats_auto_parent_suffix(repo, tmp_path: Path):
+    path = tmp_path / "list.domains"
+    settings = Ipv6Settings(
+        mode="suppress",
+        dnsdist_list_path=str(path),
+        dnsdist_reload_enable=False,
+    )
+    policy = ModeBasedIpv6Policy(settings)
+    idx = DomainIndex()
+    svc = DomainIndexService(repo, idx, ipv6_policy=policy)
+    await repo.set_suppress_ipv6_manual_default(False)
+    await repo.set_suppress_ipv6_auto_default(True)
+    await repo.add(Domain.create("*.redirector.googlevideo.com", source="manual"))
+    await repo.add(Domain.create("googlevideo.com", source="auto"))
+    await repo.add(Domain.create("other.auto", source="auto"))
+    await svc.rebuild()
+    text = path.read_text(encoding="utf-8")
+    assert "googlevideo.com" not in text
+    assert "other.auto" in text
+    assert "redirector.googlevideo.com" not in text
 
 
 @pytest.mark.asyncio
