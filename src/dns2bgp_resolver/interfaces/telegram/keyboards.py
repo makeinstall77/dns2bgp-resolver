@@ -320,6 +320,7 @@ def settings_menu(
     suppress_manual: bool = True,
     suppress_auto: bool = True,
 ) -> InlineKeyboardMarkup:
+    # вкл = отдаём AAAA; выкл = блокируем (suppress)
     manual_label = (
         "🚫 Manual AAAA: выкл" if suppress_manual else "✅ Manual AAAA: вкл"
     )
