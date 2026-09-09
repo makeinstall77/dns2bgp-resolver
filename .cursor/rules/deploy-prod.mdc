@@ -1,0 +1,13 @@
+---
+description: Deploy dns2bgp to local prod host from local/deploy.env
+alwaysApply: true
+---
+
+# Deploy target
+
+Prod host is **not** in git. Read `local/deploy.env` (`PROD_HOST`, `PROD_SSH`).
+
+When the user asks to deploy / обновить прод / выкатить:
+1. Run `local/deploy.sh` (builds `.deb`, scp, `dpkg -i` on prod).
+2. Verify `systemctl is-active dns2bgp` and that `/var/lib/dns2bgp/dns2bgp.routes` was not wiped.
+3. Do not commit `local/`. Do not replace prod `/etc/dns2bgp/config.yaml` unless explicitly asked.

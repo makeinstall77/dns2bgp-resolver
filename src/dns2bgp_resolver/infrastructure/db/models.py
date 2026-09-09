@@ -58,6 +58,9 @@ class DomainRow(Base):
     suppress_ipv6: Mapped[str] = mapped_column(
         String(8), nullable=False, default="default", server_default="default"
     )
+    route_policy: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="vpn", server_default="vpn"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -82,6 +85,9 @@ class StaticPrefixRow(Base):
     cidr: Mapped[str] = mapped_column(String(43), unique=True, nullable=False, index=True)
     name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    route_policy: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="vpn", server_default="vpn"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

@@ -114,18 +114,27 @@ def _page_nav_row(*, prev_data: str, next_data: str, page: int, pages: int) -> l
 
 
 def prefixes_list_keyboard(
-    items: list[tuple[str, str | None]],
+    items: list[tuple[int, str, str | None, str]],
     *,
     page: int,
     pages: int,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    for cidr, name in items:
+    for prefix_id, cidr, name, route_policy in items:
         label = f"{cidr}" if not name else f"{cidr} ({name})"
-        if len(label) > 64:
-            label = label[:61] + "…"
+        if len(label) > 48:
+            label = label[:45] + "…"
+        route_mark = "🔀" if route_policy == "direct" else "🛡"
         rows.append(
-            [InlineKeyboardButton(text=f"🗑 {label}", callback_data=f"p:rmok:{page}:{cidr}")]
+            [
+                InlineKeyboardButton(
+                    text=f"{route_mark} {label}",
+                    callback_data=f"p:rt:{page}:{prefix_id}",
+                ),
+                InlineKeyboardButton(
+                    text="🗑", callback_data=f"p:rmok:{page}:{cidr}"
+                ),
+            ]
         )
     if pages > 1:
         rows.append(
@@ -197,6 +206,7 @@ def manual_host_menu(
     *,
     is_mask: bool = False,
     suppress_ipv6: str = "default",
+    route_policy: str = "vpn",
 ) -> InlineKeyboardMarkup:
     actions: list[InlineKeyboardButton] = []
     if not is_mask:
@@ -216,13 +226,17 @@ def manual_host_menu(
         v6_label = "✅ AAAA вкл"
     else:
         v6_label = "⚙️ AAAA дефолт"
+    route_label = "🔀 direct" if route_policy == "direct" else "🛡 vpn"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             actions,
             [
                 InlineKeyboardButton(
                     text=v6_label, callback_data=f"d:v6:{domain_id}:{page}"
-                )
+                ),
+                InlineKeyboardButton(
+                    text=route_label, callback_data=f"d:rt:{domain_id}:{page}"
+                ),
             ],
             [InlineKeyboardButton(text="◀ К списку", callback_data=f"d:list:{page}")],
         ]
