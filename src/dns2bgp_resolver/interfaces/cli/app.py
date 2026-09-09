@@ -29,7 +29,7 @@ from dns2bgp_resolver.application.commands import (
 from dns2bgp_resolver.config import Settings
 from dns2bgp_resolver.container import AppContainer, build_container
 
-app = typer.Typer(name="dns2bgp", help="DNS → BGP pool resolver for VPN traffic steering", no_args_is_help=True)
+app = typer.Typer(name="dns2bgp", help="DNS → BGP route pool resolver", no_args_is_help=True)
 lists_app = typer.Typer(name="lists", help="Manage domain lists")
 settings_app = typer.Typer(name="settings", help="Runtime settings")
 prefixes_app = typer.Typer(name="prefixes", help="Static IP/CIDR prefixes")
