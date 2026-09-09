@@ -155,7 +155,7 @@ def _normalize_route_policy(raw: object) -> RoutePolicy:
 def punch_exclude(
     vpn_cidrs: Iterable[str], exclude_cidrs: Iterable[str]
 ) -> list[IPv4Network]:
-    """Remove exclude networks from VPN prefixes (hole-punch)."""
+    """Remove exclude networks from announced prefixes (hole-punch)."""
     excludes = [IPv4Network(c, strict=False) for c in exclude_cidrs]
     if not excludes:
         return [IPv4Network(c, strict=False) for c in vpn_cidrs]

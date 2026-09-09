@@ -69,7 +69,7 @@ class DnstapSettings(BaseModel):
 class Ipv6Settings(BaseModel):
     """
     off — IPv4 pool only (default).
-    suppress — export DomainIndex for dnsdist AAAA NODATA (VPN is IPv4-only).
+    suppress — export DomainIndex for dnsdist AAAA NODATA (IPv4-only route pool).
     announce — future: collect AAAA and export Bird IPv6 (stub for now).
     """
 
