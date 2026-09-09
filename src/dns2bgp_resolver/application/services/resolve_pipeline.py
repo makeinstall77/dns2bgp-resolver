@@ -4,8 +4,8 @@ import asyncio
 import logging
 import time
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
-from dns2bgp_resolver.application.commands.dto import ExportSummary, ResolveSummary
 from dns2bgp_resolver.application.ports.clock import Clock
 from dns2bgp_resolver.application.ports.dns_resolver import DnsResolver
 from dns2bgp_resolver.application.ports.repository import DomainRepository
@@ -19,6 +19,9 @@ from dns2bgp_resolver.domain import (
     is_announcable_prefix,
     summarize_prefixes,
 )
+
+if TYPE_CHECKING:
+    from dns2bgp_resolver.application.commands.dto import ExportSummary, ResolveSummary
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,8 @@ class ResolvePipeline:
         return timedelta(seconds=interval)
 
     async def resolve_one(self, name: DomainName) -> ResolveSummary:
+        from dns2bgp_resolver.application.commands.dto import ResolveSummary
+
         domain = await self._repository.get(name)
         if domain is None or domain.id is None:
             return ResolveSummary(
@@ -100,6 +105,8 @@ class ResolvePipeline:
         return list(await asyncio.gather(*(_one(d) for d in domains)))
 
     async def _resolve_domain(self, domain: Domain) -> ResolveSummary:
+        from dns2bgp_resolver.application.commands.dto import ResolveSummary
+
         assert domain.id is not None
         now = self._clock.now()
         old_ips = {str(a.ip) for a in domain.addresses}
@@ -194,26 +201,51 @@ class ResolvePipeline:
             summary = await self._write_export()
             self._export_dirty = False
             self._last_export_mono = now
+            if summary.skipped:
+                logger.error(
+                    "bird export skipped (%s); keeping on-disk routes",
+                    summary.skip_reason or "safety",
+                )
+                return False
             logger.info("bird export flushed (%d prefix(es))", summary.prefix_count)
             return True
 
-    async def _write_export(self) -> ExportSummary:
-        prefixes: set[str] = set()
+    async def _write_export(self, *, allow_empty: bool = False) -> ExportSummary:
+        from dns2bgp_resolver.application.commands.dto import ExportSummary
 
-        for ip in await self._repository.all_active_ips():
-            if is_announcable_ipv4(ip):
-                prefixes.add(ip_to_prefix32(ip))
+        vpn: set[str] = set()
+        direct: set[str] = set()
+
+        for ip, policy in await self._repository.all_active_ips_with_policy():
+            if not is_announcable_ipv4(ip):
+                continue
+            prefix = ip_to_prefix32(ip)
+            if policy == "direct":
+                direct.add(prefix)
+            else:
+                vpn.add(prefix)
 
         for ip in await self._repository.list_passive_ips():
             if is_announcable_ipv4(ip):
-                prefixes.add(ip_to_prefix32(ip))
+                vpn.add(ip_to_prefix32(ip))
 
         for static in await self._repository.list_static_prefixes():
-            if static.enabled and is_announcable_prefix(static.cidr):
-                prefixes.add(static.cidr)
+            if not static.enabled or not is_announcable_prefix(static.cidr):
+                continue
+            if static.route_policy == "direct":
+                direct.add(static.cidr)
+            else:
+                vpn.add(static.cidr)
 
-        ordered = summarize_prefixes(prefixes)
-        await self._exporter.export(ordered)
+        ordered = summarize_prefixes(vpn, exclude=direct)
+        written = await self._exporter.export(ordered, allow_empty=allow_empty)
+        if not written:
+            return ExportSummary(
+                prefix_count=len(ordered),
+                path=self._export_path,
+                skipped=True,
+                skip_reason="refused empty wipe of non-empty bird file",
+            )
         return ExportSummary(prefix_count=len(ordered), path=self._export_path)
 
     async def record_passive_hit(self, ip: str, matched_name: str) -> bool:
@@ -226,18 +258,21 @@ class ResolvePipeline:
             await self._request_export()
         return is_new
 
-    async def export_routes(self) -> ExportSummary:
+    async def export_routes(self, *, allow_empty: bool = False) -> ExportSummary:
         """Immediate export (CLI/API/startup). Resets coalescing timer."""
         async with self._export_lock:
-            summary = await self._write_export()
+            summary = await self._write_export(allow_empty=allow_empty)
             self._export_dirty = False
             self._last_export_mono = time.monotonic()
             return summary
 
-    async def export_after_mutation(self) -> ExportSummary:
-        """Re-export pool after add/remove without resolving."""
-        return await self.export_routes()
+    async def export_after_mutation(self, *, allow_empty: bool = False) -> ExportSummary:
+        """Re-export pool after add/remove without resolving.
 
+        Pass allow_empty=True for explicit user clear/remove commands that may
+        intentionally empty the bird include file.
+        """
+        return await self.export_routes(allow_empty=allow_empty)
     async def flush_pending_export(self) -> None:
         """Flush deferred export if any (e.g. on shutdown)."""
         if self._flush_task is not None and not self._flush_task.done():

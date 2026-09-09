@@ -228,8 +228,8 @@ class DomainRepository(ABC):
         """All enabled domain names for the in-memory match index."""
 
     @abstractmethod
-    async def list_index_rules(self) -> list[tuple[str, str]]:
-        """Enabled (name, match_mode) pairs for the in-memory match index."""
+    async def list_index_rules(self) -> list[tuple[str, str, str]]:
+        """Enabled (name, match_mode, route_policy) for the in-memory match index."""
 
     @abstractmethod
     async def list_ipv6_suppress_names(self) -> list[str]:
@@ -238,6 +238,16 @@ class DomainRepository(ABC):
     @abstractmethod
     async def set_suppress_ipv6(self, domain_id: int, mode: str) -> Domain | None:
         """Set suppress mode: default | on | off. Return None if missing."""
+
+    @abstractmethod
+    async def set_route_policy(self, domain_id: int, policy: str) -> Domain | None:
+        """Set route_policy vpn|direct (manual only for direct). Return None if missing/denied."""
+
+    @abstractmethod
+    async def set_static_prefix_route_policy(
+        self, prefix_id: int, policy: str
+    ) -> StaticPrefix | None:
+        """Set static prefix route_policy vpn|direct."""
 
     @abstractmethod
     async def replace_addresses(
@@ -264,6 +274,10 @@ class DomainRepository(ABC):
     @abstractmethod
     async def all_active_ips(self) -> list[str]:
         """IPv4 addresses for enabled *manual* domains (active resolve)."""
+
+    @abstractmethod
+    async def all_active_ips_with_policy(self) -> list[tuple[str, str]]:
+        """(ip, route_policy) for enabled manual exact domains."""
 
     @abstractmethod
     async def add_static_prefix(self, prefix: StaticPrefix) -> StaticPrefix:

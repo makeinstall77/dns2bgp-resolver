@@ -28,7 +28,7 @@ class BirdSettings(BaseModel):
     include_path: str = "./data/dns2bgp.routes"
     protocol_name: str = "dns2bgp"
     table: str = "master4"
-    nexthop: str = "wg0"
+    nexthop: str = "reject"
     birdc_enable: bool = True
     birdc_bin: str = "birdc"
     birdc_socket: str = "/run/bird/bird.ctl"

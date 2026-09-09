@@ -11,6 +11,7 @@ from dns2bgp_resolver.domain import Domain
 @dataclass(frozen=True, slots=True)
 class AddDomainCommand:
     name: str
+    route_policy: str = "vpn"
 
 
 class AddDomainHandler:
@@ -18,8 +19,11 @@ class AddDomainHandler:
         self._repository = repository
 
     async def handle(self, command: AddDomainCommand) -> CommandResult[DomainView]:
+        policy = "direct" if command.route_policy == "direct" else "vpn"
         try:
-            domain = Domain.create(command.name, source="manual", suppress_ipv6="default")
+            domain = Domain.create(
+                command.name, source="manual", suppress_ipv6="default", route_policy=policy
+            )
         except ValueError as exc:
             return CommandResult.failure(str(exc))
 

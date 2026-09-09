@@ -13,7 +13,7 @@ bird:
   include_path: "/var/lib/dns2bgp/dns2bgp.routes"
   protocol_name: dns2bgp
   table: master4
-  nexthop: "wg0"
+  nexthop: "reject"
   birdc_enable: true
   birdc_bin: birdc
   birdc_socket: "/run/bird/bird.ctl"

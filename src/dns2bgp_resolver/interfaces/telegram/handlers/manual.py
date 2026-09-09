@@ -9,6 +9,7 @@ from dns2bgp_resolver.application.commands import (
     ListDomainsCommand,
     RemoveDomainCommand,
     ResolveNowCommand,
+    SetRoutePolicyCommand,
     SetSuppressIpv6Command,
 )
 from dns2bgp_resolver.application.services.list_parse import format_domains_export
@@ -92,10 +93,15 @@ def _host_text(domain, *, manual_default: bool) -> str:
         v6 = "AAAA выкл / блокируем"
     else:
         v6 = "AAAA вкл / отдаём"
+    route = getattr(domain, "route_policy", None) or "vpn"
+    route_line = "route: direct (исключение)" if route == "direct" else "route: vpn"
     if mode == "suffix":
-        return f"🌐 {label}\nmatch: suffix (поддомены через dnstap)\nIPv6: {v6}"
+        return (
+            f"🌐 {label}\nmatch: suffix (поддомены через dnstap)\n"
+            f"IPv6: {v6}\n{route_line}"
+        )
     ips = ", ".join(str(a.ip) for a in domain.addresses) or "—"
-    return f"🌐 {label}\nIP ({len(domain.addresses)}): {ips}\nIPv6: {v6}"
+    return f"🌐 {label}\nIP ({len(domain.addresses)}): {ips}\nIPv6: {v6}\n{route_line}"
 
 
 def _host_menu(domain, page: int):
@@ -105,6 +111,7 @@ def _host_menu(domain, page: int):
         page,
         is_mask=mode == "suffix",
         suppress_ipv6=getattr(domain, "suppress_ipv6", None) or "default",
+        route_policy=getattr(domain, "route_policy", None) or "vpn",
     )
 
 
@@ -149,6 +156,34 @@ async def cb_host(callback: CallbackQuery, container: AppContainer, ui: BotUi) -
             reply_markup=_host_menu(domain, page),
         )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("d:rt:"))
+async def cb_toggle_route(callback: CallbackQuery, container: AppContainer, ui: BotUi) -> None:
+    if not allowed(container, callback.from_user.id if callback.from_user else None):
+        await callback.answer("Access denied.", show_alert=True)
+        return
+    parsed = _parse_id_page(callback.data or "")
+    if parsed is None:
+        await callback.answer("Invalid callback.")
+        return
+    domain_id, page = parsed
+    domain = await container.repository.get_by_id(domain_id)
+    if domain is None or domain.source != "manual":
+        await callback.answer("Host not found.", show_alert=True)
+        return
+    result = await container.bus.execute(SetRoutePolicyCommand(domain_id=domain_id))
+    if not result.ok or result.data is None:
+        await callback.answer(result.error or "Error", show_alert=True)
+        return
+    domain = await container.repository.get_by_id(domain_id)
+    if domain and callback.message:
+        await ui.edit(
+            callback.message,
+            _host_text(domain, manual_default=await _manual_default(container)),
+            reply_markup=_host_menu(domain, page),
+        )
+    await callback.answer(result.message or "OK")
 
 
 @router.callback_query(F.data.startswith("d:v6:"))
@@ -297,6 +332,7 @@ async def cb_add(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
         await ui.edit(
             callback.message,
             "Домен или маска:\nexample.com / *.example.com\n"
+            "Префикс `direct:` — исключение (не в VPN bird).\n"
             "Можно несколько строк сразу.",
             reply_markup=_CANCEL,
         )
@@ -331,17 +367,24 @@ async def add_domain_text(
     added = 0
     last_text = ""
     errors: list[str] = []
-    for name in lines:
-        result = await container.bus.execute(AddDomainCommand(name=name))
+    for raw in lines:
+        policy = "vpn"
+        name = raw
+        if name.lower().startswith("direct:"):
+            policy = "direct"
+            name = name.split(":", 1)[1].strip()
+        result = await container.bus.execute(
+            AddDomainCommand(name=name, route_policy=policy)
+        )
         if result.ok:
             added += 1
             view = result.data
             label = view.label if view else name
             if view and view.match_mode == "suffix":
-                last_text = f"Added {label}"
+                last_text = f"Added {label} [{view.route_policy}]"
             else:
                 ips = ", ".join(view.addresses) if view and view.addresses else "-"
-                last_text = f"Added {label}: {ips}"
+                last_text = f"Added {label}: {ips} [{view.route_policy if view else policy}]"
         else:
             errors.append(f"{name}: {result.error}")
 
