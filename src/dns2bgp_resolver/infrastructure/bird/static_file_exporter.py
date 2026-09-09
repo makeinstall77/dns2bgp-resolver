@@ -86,7 +86,9 @@ class StaticFileBirdExporter(RouteExporter):
         self._settings = settings
 
     def _via_clause(self) -> str:
-        nexthop = self._settings.nexthop
+        nexthop = (self._settings.nexthop or "reject").strip()
+        if nexthop == "reject":
+            return "reject"
         if _looks_like_ip(nexthop):
             return f"via {nexthop}"
         return f'via "{nexthop}"'
@@ -100,20 +102,30 @@ class StaticFileBirdExporter(RouteExporter):
             f"  ipv4;",
         ]
         for prefix in prefixes:
-#            lines.append(f"  route {prefix} {via};")
-            lines.append(f"  route {prefix} reject;")
+            lines.append(f"  route {prefix} {via};")
         lines.append("}")
         lines.append("")
         return "\n".join(lines)
 
-    async def export(self, prefixes: list[str]) -> None:
+    async def export(self, prefixes: list[str], *, allow_empty: bool = False) -> bool:
         path = Path(self._settings.include_path)
+        if not prefixes and not allow_empty:
+            existing = await asyncio.to_thread(count_routes_in_file, path)
+            if existing and existing > 0:
+                logger.error(
+                    "refusing empty bird export: %s already has %d route(s); "
+                    "keep existing file (allow_empty required for intentional wipe)",
+                    path,
+                    existing,
+                )
+                return False
+
         content = self._render(prefixes)
         await asyncio.to_thread(self._atomic_write, path, content)
         logger.info("wrote %d route(s) to %s", len(prefixes), path)
         if self._settings.birdc_enable:
             await self._reload_bird()
-
+        return True
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)

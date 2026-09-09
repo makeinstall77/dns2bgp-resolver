@@ -71,6 +71,11 @@ def _normalize_suppress_ipv6(raw: object) -> str:
     return "default"
 
 
+def _normalize_route_policy(raw: object) -> str:
+    text = str(raw or "vpn").strip().lower()
+    return "direct" if text == "direct" else "vpn"
+
+
 def _row_to_domain(row: DomainRow) -> Domain:
     return Domain(
         id=row.id,
@@ -80,6 +85,7 @@ def _row_to_domain(row: DomainRow) -> Domain:
         enabled=row.enabled,
         match_mode=getattr(row, "match_mode", None) or "suffix",  # type: ignore[arg-type]
         suppress_ipv6=_normalize_suppress_ipv6(getattr(row, "suppress_ipv6", "default")),  # type: ignore[arg-type]
+        route_policy=_normalize_route_policy(getattr(row, "route_policy", "vpn")),  # type: ignore[arg-type]
         created_at=_ensure_aware(row.created_at),
         next_resolve_at=_ensure_aware(row.next_resolve_at),
         last_resolved_at=_ensure_aware(row.last_resolved_at),
@@ -96,6 +102,7 @@ def _row_to_static_prefix(row: StaticPrefixRow) -> StaticPrefix:
         cidr=row.cidr,
         name=row.name,
         enabled=row.enabled,
+        route_policy=_normalize_route_policy(getattr(row, "route_policy", "vpn")),  # type: ignore[arg-type]
         created_at=_ensure_aware(row.created_at),
     )
 
@@ -197,6 +204,22 @@ class SqlAlchemyDomainRepository(DomainRepository):
                             "NOT IN ('default', 'on', 'off')"
                         )
                     )
+                if "route_policy" not in columns:
+                    await conn.execute(
+                        text(
+                            "ALTER TABLE domains ADD COLUMN route_policy VARCHAR(8) "
+                            "NOT NULL DEFAULT 'vpn'"
+                        )
+                    )
+                result = await conn.execute(text("PRAGMA table_info(static_prefixes)"))
+                sp_columns = {row[1] for row in result.fetchall()}
+                if "route_policy" not in sp_columns:
+                    await conn.execute(
+                        text(
+                            "ALTER TABLE static_prefixes ADD COLUMN route_policy VARCHAR(8) "
+                            "NOT NULL DEFAULT 'vpn'"
+                        )
+                    )
             elif conn.dialect.name == "postgresql":
                 result = await conn.execute(
                     text(
@@ -272,6 +295,33 @@ class SqlAlchemyDomainRepository(DomainRepository):
                             "WHERE suppress_ipv6 NOT IN ('default', 'on', 'off')"
                         )
                     )
+                result = await conn.execute(
+                    text(
+                        "SELECT 1 FROM information_schema.columns "
+                        "WHERE table_name = 'domains' AND column_name = 'route_policy'"
+                    )
+                )
+                if result.fetchone() is None:
+                    await conn.execute(
+                        text(
+                            "ALTER TABLE domains ADD COLUMN route_policy VARCHAR(8) "
+                            "NOT NULL DEFAULT 'vpn'"
+                        )
+                    )
+                result = await conn.execute(
+                    text(
+                        "SELECT 1 FROM information_schema.columns "
+                        "WHERE table_name = 'static_prefixes' "
+                        "AND column_name = 'route_policy'"
+                    )
+                )
+                if result.fetchone() is None:
+                    await conn.execute(
+                        text(
+                            "ALTER TABLE static_prefixes ADD COLUMN route_policy "
+                            "VARCHAR(8) NOT NULL DEFAULT 'vpn'"
+                        )
+                    )
 
     async def close(self) -> None:
         await self._engine.dispose()
@@ -284,6 +334,7 @@ class SqlAlchemyDomainRepository(DomainRepository):
             enabled=domain.enabled,
             match_mode=domain.match_mode,
             suppress_ipv6=domain.suppress_ipv6,
+            route_policy=_normalize_route_policy(domain.route_policy),
         )
         async with self._session_factory() as session:
             session.add(row)
@@ -406,8 +457,9 @@ class SqlAlchemyDomainRepository(DomainRepository):
 
                 add_result = await conn.execute(
                     text(
-                        "INSERT INTO domains (name, source, list_id, enabled, match_mode, suppress_ipv6) "
-                        "SELECT t.name, 'auto', :list_id, 1, 'suffix', 'default' "
+                        "INSERT INTO domains (name, source, list_id, enabled, match_mode, "
+                        "suppress_ipv6, route_policy) "
+                        "SELECT t.name, 'auto', :list_id, 1, 'suffix', 'default', 'vpn' "
                         "FROM sync_target t "
                         "WHERE NOT EXISTS (SELECT 1 FROM domains d WHERE d.name = t.name)"
                     ),
@@ -461,8 +513,10 @@ class SqlAlchemyDomainRepository(DomainRepository):
 
                 add_result = await conn.execute(
                     text(
-                        "INSERT INTO domains (name, source, enabled, match_mode, suppress_ipv6) "
-                        "SELECT t.name, 'auto', 1, 'suffix', 'default' FROM sync_target t "
+                        "INSERT INTO domains (name, source, enabled, match_mode, "
+                        "suppress_ipv6, route_policy) "
+                        "SELECT t.name, 'auto', 1, 'suffix', 'default', 'vpn' "
+                        "FROM sync_target t "
                         "WHERE NOT EXISTS (SELECT 1 FROM domains d WHERE d.name = t.name)"
                     )
                 )
@@ -820,14 +874,17 @@ class SqlAlchemyDomainRepository(DomainRepository):
             )
             return list(result.scalars().all())
 
-    async def list_index_rules(self) -> list[tuple[str, str]]:
+    async def list_index_rules(self) -> list[tuple[str, str, str]]:
         async with self._session_factory() as session:
             result = await session.execute(
-                select(DomainRow.name, DomainRow.match_mode).where(
-                    DomainRow.enabled.is_(True)
-                )
+                select(
+                    DomainRow.name, DomainRow.match_mode, DomainRow.route_policy
+                ).where(DomainRow.enabled.is_(True))
             )
-            return [(name, mode or "suffix") for name, mode in result.all()]
+            return [
+                (name, mode or "suffix", _normalize_route_policy(policy))
+                for name, mode, policy in result.all()
+            ]
 
     async def list_ipv6_suppress_names(self) -> list[str]:
         from dns2bgp_resolver.domain import (
@@ -869,6 +926,32 @@ class SqlAlchemyDomainRepository(DomainRepository):
             await session.commit()
             await session.refresh(row)
             return _row_to_domain(row)
+
+    async def set_route_policy(self, domain_id: int, policy: str) -> Domain | None:
+        normalized = _normalize_route_policy(policy)
+        async with self._session_factory() as session:
+            row = await session.get(DomainRow, domain_id)
+            if row is None:
+                return None
+            if row.source != "manual" and normalized == "direct":
+                return None
+            row.route_policy = normalized
+            await session.commit()
+            await session.refresh(row)
+            return _row_to_domain(row)
+
+    async def set_static_prefix_route_policy(
+        self, prefix_id: int, policy: str
+    ) -> StaticPrefix | None:
+        normalized = _normalize_route_policy(policy)
+        async with self._session_factory() as session:
+            row = await session.get(StaticPrefixRow, prefix_id)
+            if row is None:
+                return None
+            row.route_policy = normalized
+            await session.commit()
+            await session.refresh(row)
+            return _row_to_static_prefix(row)
 
     async def replace_addresses(
         self,
@@ -938,8 +1021,27 @@ class SqlAlchemyDomainRepository(DomainRepository):
             )
             return list(result.scalars().all())
 
+    async def all_active_ips_with_policy(self) -> list[tuple[str, str]]:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(AddressRow.ip, DomainRow.route_policy)
+                .join(DomainRow)
+                .where(DomainRow.enabled.is_(True))
+                .where(DomainRow.source == "manual")
+                .where(DomainRow.match_mode != "suffix")
+                .where(AddressRow.family == 4)
+            )
+            return [
+                (ip, _normalize_route_policy(policy)) for ip, policy in result.all()
+            ]
+
     async def add_static_prefix(self, prefix: StaticPrefix) -> StaticPrefix:
-        row = StaticPrefixRow(cidr=prefix.cidr, name=prefix.name, enabled=prefix.enabled)
+        row = StaticPrefixRow(
+            cidr=prefix.cidr,
+            name=prefix.name,
+            enabled=prefix.enabled,
+            route_policy=_normalize_route_policy(prefix.route_policy),
+        )
         async with self._session_factory() as session:
             session.add(row)
             try:

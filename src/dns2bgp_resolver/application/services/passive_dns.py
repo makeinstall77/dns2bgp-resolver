@@ -26,8 +26,12 @@ class PassiveDnsCollector:
         matched = self._index.matches(qname)
         if matched is None:
             return
+        if matched.route_policy == "direct":
+            return
         self._matched += 1
         for ip in ips:
-            is_new = await self._pipeline.record_passive_hit(ip, matched)
+            is_new = await self._pipeline.record_passive_hit(ip, matched.name)
             if is_new:
-                logger.info("passive hit %s → %s (rule %s)", qname, ip, matched)
+                logger.info(
+                    "passive hit %s → %s (rule %s)", qname, ip, matched.name
+                )

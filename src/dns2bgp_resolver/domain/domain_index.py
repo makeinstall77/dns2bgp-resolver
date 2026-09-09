@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from threading import Lock
 from typing import Iterable
+
+from dns2bgp_resolver.domain import RoutePolicy
 
 
 def normalize_qname(name: str) -> str:
     return name.strip().strip(".").lower()
+
+
+@dataclass(frozen=True, slots=True)
+class IndexMatch:
+    name: str
+    route_policy: RoutePolicy = "vpn"
 
 
 class DomainIndex:
@@ -14,8 +23,8 @@ class DomainIndex:
     __slots__ = ("_exact", "_suffix", "_lock", "_size")
 
     def __init__(self) -> None:
-        self._exact: frozenset[str] = frozenset()
-        self._suffix: frozenset[str] = frozenset()
+        self._exact: dict[str, RoutePolicy] = {}
+        self._suffix: dict[str, RoutePolicy] = {}
         self._lock = Lock()
         self._size = 0
 
@@ -26,50 +35,61 @@ class DomainIndex:
 
     def rebuild(
         self,
-        names: set[str] | frozenset[str] | list[str] | Iterable[tuple[str, str]] | None = None,
+        names: set[str] | frozenset[str] | list[str] | Iterable[tuple] | None = None,
         *,
-        rules: Iterable[tuple[str, str]] | None = None,
+        rules: Iterable[tuple] | None = None,
     ) -> int:
-        """Rebuild from bare names (all suffix) or (name, match_mode) rules."""
-        exact: set[str] = set()
-        suffix: set[str] = set()
+        """Rebuild from bare names (all suffix/vpn) or (name, mode[, policy]) rules."""
+        exact: dict[str, RoutePolicy] = {}
+        suffix: dict[str, RoutePolicy] = {}
         source = rules if rules is not None else names or ()
         for item in source:
             if isinstance(item, tuple):
-                raw, mode = item
-                n = normalize_qname(raw)
+                raw = item[0]
+                mode = item[1] if len(item) > 1 else "suffix"
+                policy: RoutePolicy = (
+                    "direct" if len(item) > 2 and item[2] == "direct" else "vpn"
+                )
+                n = normalize_qname(str(raw))
                 if not n or "." not in n:
                     continue
-                if mode == "exact":
-                    exact.add(n)
-                else:
-                    suffix.add(n)
+                target = exact if mode == "exact" else suffix
+                if policy == "direct" or n not in target:
+                    target[n] = policy
             else:
                 n = normalize_qname(item)
                 if n and "." in n:
-                    suffix.add(n)
+                    suffix[n] = "vpn"
         with self._lock:
-            self._exact = frozenset(exact)
-            self._suffix = frozenset(suffix)
-            self._size = len(exact | suffix)
+            self._exact = exact
+            self._suffix = suffix
+            self._size = len(set(exact) | set(suffix))
             return self._size
 
-    def matches(self, qname: str) -> str | None:
-        """Return matched rule (qname or parent suffix) if listed, else None."""
+    def matches(self, qname: str) -> IndexMatch | None:
+        """Return matched rule; if any match is direct, direct wins."""
         q = normalize_qname(qname)
         if not q or "." not in q:
             return None
         with self._lock:
             exact = self._exact
             suffix = self._suffix
-        if q in exact or q in suffix:
-            return q
+        candidates: list[IndexMatch] = []
+        if q in exact:
+            candidates.append(IndexMatch(q, exact[q]))
+        if q in suffix:
+            candidates.append(IndexMatch(q, suffix[q]))
         parts = q.split(".")
         for i in range(1, len(parts) - 1):
             candidate = ".".join(parts[i:])
             if candidate in suffix:
-                return candidate
-        return None
+                candidates.append(IndexMatch(candidate, suffix[candidate]))
+        if not candidates:
+            return None
+        for match in candidates:
+            if match.route_policy == "direct":
+                return match
+        return candidates[0]
 
     def contains_exact(self, name: str) -> bool:
         n = normalize_qname(name)
@@ -79,4 +99,4 @@ class DomainIndex:
     def names_snapshot(self) -> frozenset[str]:
         """All indexed names (exact ∪ suffix) for policy exporters."""
         with self._lock:
-            return self._exact | self._suffix
+            return frozenset(self._exact) | frozenset(self._suffix)
