@@ -59,6 +59,12 @@ from dns2bgp_resolver.application.commands.set_suppress_ipv6 import (
     SetSuppressIpv6Command,
     SetSuppressIpv6Handler,
 )
+from dns2bgp_resolver.application.commands.set_route_policy import (
+    SetPrefixRoutePolicyCommand,
+    SetPrefixRoutePolicyHandler,
+    SetRoutePolicyCommand,
+    SetRoutePolicyHandler,
+)
 from dns2bgp_resolver.application.ports.clock import SystemClock
 from dns2bgp_resolver.application.ports.repository import DomainRepository
 from dns2bgp_resolver.application.ports.sync_alert import SyncAlertNotifier
@@ -194,7 +200,7 @@ class RemoveDomainAndExportHandler:
         result = await self._remove.handle(command)
         if result.ok:
             await self._index_service.rebuild()
-            await self._pipeline.export_after_mutation()
+            await self._pipeline.export_after_mutation(allow_empty=True)
         return result
 
 
@@ -264,6 +270,14 @@ def build_container(settings: Settings | None = None) -> AppContainer:
     bus.register(RemovePrefixCommand, RemovePrefixHandler(repository, pipeline))
     bus.register(ListPrefixesCommand, ListPrefixesHandler(repository))
     bus.register(SetSuppressIpv6Command, SetSuppressIpv6Handler(repository, index_service))
+    bus.register(
+        SetRoutePolicyCommand,
+        SetRoutePolicyHandler(repository, pipeline, index_service),
+    )
+    bus.register(
+        SetPrefixRoutePolicyCommand,
+        SetPrefixRoutePolicyHandler(repository, pipeline),
+    )
 
     scheduler = RefreshScheduler(pipeline)
     auto_sync_scheduler = AutoListSyncScheduler(

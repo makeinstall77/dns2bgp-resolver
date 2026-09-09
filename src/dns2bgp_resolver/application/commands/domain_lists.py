@@ -141,7 +141,7 @@ class RemoveDomainListAndExportHandler:
             return CommandResult.failure(f"list not found: {command.id}")
         if self._index_service is not None:
             await self._index_service.rebuild()
-        await self._pipeline.export_after_mutation()
+        await self._pipeline.export_after_mutation(allow_empty=True)
         return CommandResult.success(existing.name, message=f"removed list {existing.name}")
 
 
@@ -168,7 +168,7 @@ class ClearDomainListHandler:
         count = await self._repository.clear_list_domains(command.id)
         if self._index_service is not None:
             await self._index_service.rebuild()
-        await self._pipeline.export_after_mutation()
+        await self._pipeline.export_after_mutation(allow_empty=True)
         return CommandResult.success(count, message=f"cleared {count} domain(s) from {existing.name}")
 
 

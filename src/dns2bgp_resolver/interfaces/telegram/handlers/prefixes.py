@@ -8,6 +8,7 @@ from dns2bgp_resolver.application.commands import (
     AddPrefixCommand,
     ListPrefixesCommand,
     RemovePrefixCommand,
+    SetPrefixRoutePolicyCommand,
 )
 from dns2bgp_resolver.application.services.list_parse import format_prefixes_export
 from dns2bgp_resolver.container import AppContainer
@@ -38,8 +39,15 @@ async def _render_prefix_page(container: AppContainer, page: int) -> tuple[str, 
             "🛣 Static prefixes: пусто.\nПри экспорте: /32 → /24 → соседние сливаются.",
             prefixes_menu(),
         )
-    text = f"🛣 Prefixes — стр. {data.page}/{data.pages} ({data.total})\nнажмите чтобы удалить"
-    items = [(p.cidr, p.name) for p in data.items]
+    text = (
+        f"🛣 Prefixes — стр. {data.page}/{data.pages} ({data.total})\n"
+        "🛡/🔀 — toggle vpn/direct; 🗑 — удалить"
+    )
+    items = [
+        (p.id or 0, p.cidr, p.name, p.route_policy)
+        for p in data.items
+        if p.id is not None
+    ]
     return text, prefixes_list_keyboard(items, page=data.page, pages=data.pages)
 
 
@@ -91,6 +99,7 @@ async def cb_add(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
         await ui.edit(
             callback.message,
             "Введите IPv4 или CIDR (например 149.154.160.0/20).\n"
+            "Префикс `direct:` — исключение (не в VPN bird).\n"
             "Можно несколько строк сразу.",
             reply_markup=_CANCEL,
         )
@@ -107,6 +116,33 @@ async def cb_remove(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> No
             reply_markup=_CANCEL,
         )
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("p:rt:"))
+async def cb_toggle_route(
+    callback: CallbackQuery, container: AppContainer, ui: BotUi
+) -> None:
+    if not allowed(container, callback.from_user.id if callback.from_user else None):
+        await callback.answer("Access denied.", show_alert=True)
+        return
+    parts = (callback.data or "").split(":")
+    if len(parts) < 4:
+        await callback.answer("Invalid callback.")
+        return
+    try:
+        page = int(parts[2])
+        prefix_id = int(parts[3])
+    except ValueError:
+        await callback.answer("Invalid callback.")
+        return
+    result = await container.bus.execute(SetPrefixRoutePolicyCommand(prefix_id=prefix_id))
+    if not result.ok:
+        await callback.answer(result.error or "Error", show_alert=True)
+        return
+    text, markup = await _render_prefix_page(container, page)
+    if callback.message:
+        await ui.edit(callback.message, text, reply_markup=markup)
+    await callback.answer(result.message or "OK")
 
 
 @router.callback_query(F.data.startswith("p:rmok:"))
@@ -153,9 +189,15 @@ async def add_prefix_text(
     for raw in lines:
         name = None
         cidr = raw
-        if " " in raw:
-            cidr, name = raw.split(None, 1)
-        result = await container.bus.execute(AddPrefixCommand(cidr=cidr, name=name))
+        policy = "vpn"
+        if cidr.lower().startswith("direct:"):
+            policy = "direct"
+            cidr = cidr.split(":", 1)[1].strip()
+        if " " in cidr:
+            cidr, name = cidr.split(None, 1)
+        result = await container.bus.execute(
+            AddPrefixCommand(cidr=cidr, name=name, route_policy=policy)
+        )
         if result.ok:
             added += 1
             last_ok = result.message or f"added {cidr}"

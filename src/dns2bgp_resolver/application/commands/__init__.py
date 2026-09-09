@@ -61,6 +61,12 @@ from dns2bgp_resolver.application.commands.set_suppress_ipv6 import (
     SetSuppressIpv6Command,
     SetSuppressIpv6Handler,
 )
+from dns2bgp_resolver.application.commands.set_route_policy import (
+    SetPrefixRoutePolicyCommand,
+    SetPrefixRoutePolicyHandler,
+    SetRoutePolicyCommand,
+    SetRoutePolicyHandler,
+)
 from dns2bgp_resolver.application.commands.settings_cmds import (
     GetSettingsCommand,
     GetSettingsHandler,
@@ -123,6 +129,10 @@ __all__ = [
     "SetSuppressIpv6DefaultCommand",
     "SetSuppressIpv6DefaultHandler",
     "SetSuppressIpv6Handler",
+    "SetRoutePolicyCommand",
+    "SetRoutePolicyHandler",
+    "SetPrefixRoutePolicyCommand",
+    "SetPrefixRoutePolicyHandler",
     "SettingsView",
     "SyncAutoListCommand",
     "SyncAutoListHandler",
