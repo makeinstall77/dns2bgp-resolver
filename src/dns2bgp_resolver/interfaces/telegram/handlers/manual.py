@@ -332,7 +332,7 @@ async def cb_add(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
         await ui.edit(
             callback.message,
             "Домен или маска:\nexample.com / *.example.com\n"
-            "Префикс `direct:` — исключение (не в VPN bird).\n"
+            "Префикс `direct:` — исключение (не в bird-пуле).\n"
             "Можно несколько строк сразу.",
             reply_markup=_CANCEL,
         )

@@ -1,5 +1,5 @@
 [Unit]
-Description=dns2bgp-resolver (DNS → BGP pool for VPN steering)
+Description=dns2bgp-resolver (DNS → BGP route pool)
 After=network-online.target dnsdist.service
 Wants=network-online.target dnsdist.service
 
