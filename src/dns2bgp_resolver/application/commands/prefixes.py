@@ -16,6 +16,7 @@ class PrefixView:
     name: str | None
     enabled: bool
     id: int | None = None
+    route_policy: str = "vpn"
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +32,7 @@ class PrefixPageView:
 class AddPrefixCommand:
     cidr: str
     name: str | None = None
+    route_policy: str = "vpn"
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,8 +52,11 @@ class AddPrefixHandler:
         self._pipeline = pipeline
 
     async def handle(self, command: AddPrefixCommand) -> CommandResult[PrefixView]:
+        policy = "direct" if command.route_policy == "direct" else "vpn"
         try:
-            prefix = StaticPrefix(cidr=command.cidr, name=command.name)
+            prefix = StaticPrefix(
+                cidr=command.cidr, name=command.name, route_policy=policy
+            )
         except ValueError as exc:
             return CommandResult.failure(str(exc))
         if not is_announcable_prefix(prefix.cidr):
@@ -62,7 +67,13 @@ class AddPrefixHandler:
             return CommandResult.failure(f"prefix already exists: {prefix.cidr}")
         await self._pipeline.export_after_mutation()
         return CommandResult.success(
-            PrefixView(cidr=saved.cidr, name=saved.name, enabled=saved.enabled, id=saved.id),
+            PrefixView(
+                cidr=saved.cidr,
+                name=saved.name,
+                enabled=saved.enabled,
+                id=saved.id,
+                route_policy=saved.route_policy,
+            ),
             message=f"added {saved.cidr}",
         )
 
@@ -80,7 +91,7 @@ class RemovePrefixHandler:
         removed = await self._repository.remove_static_prefix(command.cidr)
         if not removed:
             return CommandResult.failure(f"prefix not found: {command.cidr}")
-        await self._pipeline.export_after_mutation()
+        await self._pipeline.export_after_mutation(allow_empty=True)
         return CommandResult.success(command.cidr, message=f"removed {command.cidr}")
 
 
@@ -90,7 +101,13 @@ class ListPrefixesHandler:
 
     async def handle(self, command: ListPrefixesCommand) -> CommandResult[PrefixPageView]:
         all_items = [
-            PrefixView(cidr=p.cidr, name=p.name, enabled=p.enabled, id=p.id)
+            PrefixView(
+                cidr=p.cidr,
+                name=p.name,
+                enabled=p.enabled,
+                id=p.id,
+                route_policy=p.route_policy,
+            )
             for p in await self._repository.list_static_prefixes()
         ]
         total = len(all_items)

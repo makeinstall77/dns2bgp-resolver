@@ -80,17 +80,21 @@ def main(
 def add_domain(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Domain or *.example.com suffix mask"),
+    route: str = typer.Option("vpn", "--route", help="vpn (default) or direct exception"),
 ) -> None:
     """Add a domain, resolve it, and update the bird include file."""
 
     async def _action(container: AppContainer):
-        result = await container.bus.execute(AddDomainCommand(name=name))
+        policy = "direct" if route.strip().lower() == "direct" else "vpn"
+        result = await container.bus.execute(
+            AddDomainCommand(name=name, route_policy=policy)
+        )
         if not result.ok:
             typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
             raise typer.Exit(1)
         view = result.data
         ips = ", ".join(view.addresses) if view and view.addresses else "(none yet)"
-        typer.echo(f"{result.message}: {ips}")
+        typer.echo(f"{result.message}: {ips} [{view.route_policy if view else policy}]")
 
     _run(_with_container(ctx.obj["config"], _action))
 
@@ -100,10 +104,12 @@ def prefixes_add(
     ctx: typer.Context,
     cidr: str = typer.Argument(..., help="IPv4 address or CIDR (e.g. 149.154.160.0/20)"),
     name: str = typer.Option("", "--name", "-n", help="Optional label"),
+    route: str = typer.Option("vpn", "--route", help="vpn (default) or direct exception"),
 ) -> None:
     async def _action(container: AppContainer):
+        policy = "direct" if route.strip().lower() == "direct" else "vpn"
         result = await container.bus.execute(
-            AddPrefixCommand(cidr=cidr, name=name.strip() or None)
+            AddPrefixCommand(cidr=cidr, name=name.strip() or None, route_policy=policy)
         )
         if not result.ok:
             typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
@@ -207,11 +213,18 @@ def resolve_domains(
 
 
 @app.command("export")
-def export_routes(ctx: typer.Context) -> None:
+def export_routes(
+    ctx: typer.Context,
+    force_empty: bool = typer.Option(
+        False,
+        "--force-empty",
+        help="Allow rewriting bird file to zero routes (intentional wipe)",
+    ),
+) -> None:
     """Rewrite the bird include file from the current IP pool."""
 
     async def _action(container: AppContainer):
-        result = await container.bus.execute(ExportRoutesCommand())
+        result = await container.bus.execute(ExportRoutesCommand(allow_empty=force_empty))
         if not result.ok:
             typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
             raise typer.Exit(1)

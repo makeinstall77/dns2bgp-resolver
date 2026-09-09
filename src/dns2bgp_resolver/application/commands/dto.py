@@ -31,6 +31,7 @@ class DomainView:
     source: str = "manual"
     match_mode: str = "exact"
     suppress_ipv6: str = "default"
+    route_policy: str = "vpn"
     addresses: list[str] = field(default_factory=list)
     next_resolve_at: str | None = None
     last_resolved_at: str | None = None
@@ -101,6 +102,8 @@ class ResolveSummary:
 class ExportSummary:
     prefix_count: int
     path: str
+    skipped: bool = False
+    skip_reason: str | None = None
 
 
 def domain_to_view(domain: Any) -> DomainView:
@@ -114,6 +117,7 @@ def domain_to_view(domain: Any) -> DomainView:
         source=domain.source,
         match_mode=getattr(domain, "match_mode", None) or "exact",
         suppress_ipv6=getattr(domain, "suppress_ipv6", None) or "default",
+        route_policy=getattr(domain, "route_policy", None) or "vpn",
         addresses=[str(a.ip) for a in domain.addresses],
         next_resolve_at=domain.next_resolve_at.isoformat() if domain.next_resolve_at else None,
         last_resolved_at=domain.last_resolved_at.isoformat() if domain.last_resolved_at else None,

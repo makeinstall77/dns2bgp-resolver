@@ -8,7 +8,7 @@ from dns2bgp_resolver.application.services.resolve_pipeline import ResolvePipeli
 
 @dataclass(frozen=True, slots=True)
 class ExportRoutesCommand:
-    pass
+    allow_empty: bool = False
 
 
 class ExportRoutesHandler:
@@ -16,6 +16,13 @@ class ExportRoutesHandler:
         self._pipeline = pipeline
 
     async def handle(self, command: ExportRoutesCommand) -> CommandResult[ExportSummary]:
-        del command
-        summary = await self._pipeline.export_routes()
-        return CommandResult.success(summary, message=f"exported {summary.prefix_count} prefix(es)")
+        summary = await self._pipeline.export_routes(allow_empty=command.allow_empty)
+        if summary.skipped:
+            return CommandResult.failure(
+                summary.skip_reason
+                or "export skipped: refused empty wipe of non-empty bird file",
+                data=summary,
+            )
+        return CommandResult.success(
+            summary, message=f"exported {summary.prefix_count} prefix(es)"
+        )

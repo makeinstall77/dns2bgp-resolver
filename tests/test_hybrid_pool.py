@@ -43,9 +43,9 @@ async def repo(tmp_path: Path):
 def test_domain_index_suffix_match():
     idx = DomainIndex()
     idx.rebuild({"example.com", "other.org"})
-    assert idx.matches("example.com") == "example.com"
-    assert idx.matches("www.example.com") == "example.com"
-    assert idx.matches("a.b.example.com") == "example.com"
+    assert idx.matches("example.com").name == "example.com"
+    assert idx.matches("www.example.com").name == "example.com"
+    assert idx.matches("a.b.example.com").name == "example.com"
     assert idx.matches("notlisted.net") is None
     assert idx.matches("com") is None
 
@@ -67,10 +67,10 @@ def test_parse_wildcard():
 def test_domain_index_exact_vs_suffix():
     idx = DomainIndex()
     idx.rebuild(rules=[("exact.com", "exact"), ("suffix.com", "suffix")])
-    assert idx.matches("exact.com") == "exact.com"
+    assert idx.matches("exact.com").name == "exact.com"
     assert idx.matches("www.exact.com") is None
-    assert idx.matches("a.suffix.com") == "suffix.com"
-    assert idx.matches("suffix.com") == "suffix.com"
+    assert idx.matches("a.suffix.com").name == "suffix.com"
+    assert idx.matches("suffix.com").name == "suffix.com"
 
 
 def test_prefix_keeps_length():
@@ -139,7 +139,7 @@ async def test_index_rebuild_from_repo(repo):
     svc = DomainIndexService(repo, DomainIndex())
     size = await svc.rebuild()
     assert size == 2
-    assert svc.index.matches("x.a.example") == "a.example"
+    assert svc.index.matches("x.a.example").name == "a.example"
     assert svc.index.matches("x.b.example") is None
 
 

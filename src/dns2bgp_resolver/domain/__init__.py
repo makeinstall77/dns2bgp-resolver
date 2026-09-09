@@ -13,6 +13,7 @@ DomainListType = Literal["url", "file"]
 MatchMode = Literal["exact", "suffix"]
 PrefixSource = Literal["static", "passive", "manual"]
 Ipv6SuppressMode = Literal["default", "on", "off"]
+RoutePolicy = Literal["vpn", "direct"]
 
 
 def resolve_ipv6_suppress(mode: Ipv6SuppressMode, *, global_default: bool) -> bool:
@@ -146,16 +147,57 @@ def _drop_covered(networks: list[IPv4Network]) -> list[IPv4Network]:
     return kept
 
 
-def summarize_prefixes(cidrs: Iterable[str]) -> list[str]:
+def _normalize_route_policy(raw: object) -> RoutePolicy:
+    text = str(raw or "vpn").strip().lower()
+    return "direct" if text == "direct" else "vpn"
+
+
+def punch_exclude(
+    vpn_cidrs: Iterable[str], exclude_cidrs: Iterable[str]
+) -> list[IPv4Network]:
+    """Remove exclude networks from VPN prefixes (hole-punch)."""
+    excludes = [IPv4Network(c, strict=False) for c in exclude_cidrs]
+    if not excludes:
+        return [IPv4Network(c, strict=False) for c in vpn_cidrs]
+    result: list[IPv4Network] = []
+    for raw in vpn_cidrs:
+        parts = [IPv4Network(raw, strict=False)]
+        for ex in excludes:
+            next_parts: list[IPv4Network] = []
+            for part in parts:
+                if not part.overlaps(ex):
+                    next_parts.append(part)
+                elif part.subnet_of(ex):
+                    continue
+                elif ex.subnet_of(part):
+                    next_parts.extend(part.address_exclude(ex))
+            parts = next_parts
+        result.extend(parts)
+    return result
+
+
+def summarize_prefixes(
+    cidrs: Iterable[str], *, exclude: Iterable[str] | None = None
+) -> list[str]:
     """Aggregate IPv4 prefixes for BGP export.
 
     - lone host → /32
     - 2+ hosts in the same /24 → that /24
     - adjacent equal-length prefixes collapse (/24+/24→/23, …)
     - prefixes covered by a broader one are dropped
+    - if exclude is set: punch holes and never advertise aggregates covering exclude
     """
-    networks = [IPv4Network(c, strict=False) for c in cidrs]
+    exclude_list = list(exclude or ())
+    networks = punch_exclude(cidrs, exclude_list) if exclude_list else [
+        IPv4Network(c, strict=False) for c in cidrs
+    ]
     networks = _drop_covered(networks)
+    exclude_nets = [IPv4Network(c, strict=False) for c in exclude_list]
+
+    def touches_exclude(net: IPv4Network) -> bool:
+        return any(
+            net == ex or net.subnet_of(ex) or ex.subnet_of(net) for ex in exclude_nets
+        )
 
     by_24: dict[IPv4Network, list[IPv4Network]] = defaultdict(list)
     rest: list[IPv4Network] = []
@@ -170,12 +212,16 @@ def summarize_prefixes(cidrs: Iterable[str]) -> list[str]:
     for parent, hosts in by_24.items():
         if any(parent == other or parent.subnet_of(other) for other in rest):
             continue
-        if len(hosts) >= 2:
+        if len(hosts) >= 2 and not touches_exclude(parent):
             promoted.append(parent)
         else:
             promoted.extend(hosts)
 
-    return [str(n) for n in collapse_addresses(_drop_covered(promoted))]
+    collapsed = list(collapse_addresses(_drop_covered(promoted)))
+    if exclude_nets:
+        collapsed = punch_exclude((str(n) for n in collapsed), exclude_list)
+        collapsed = _drop_covered(collapsed)
+    return [str(n) for n in collapsed]
 
 
 def is_announcable_ipv4(ip: str) -> bool:
@@ -259,6 +305,7 @@ class Domain:
     enabled: bool = True
     match_mode: MatchMode = "exact"
     suppress_ipv6: Ipv6SuppressMode = "default"
+    route_policy: RoutePolicy = "vpn"
     created_at: datetime | None = None
     next_resolve_at: datetime | None = None
     last_resolved_at: datetime | None = None
@@ -273,13 +320,18 @@ class Domain:
         source: DomainSource = "manual",
         match_mode: MatchMode | None = None,
         suppress_ipv6: Ipv6SuppressMode = "default",
+        route_policy: RoutePolicy = "vpn",
     ) -> Self:
         parsed, mode = parse_domain_input(name)
+        policy: RoutePolicy = "vpn" if source == "auto" else route_policy
+        if policy not in ("vpn", "direct"):
+            policy = "vpn"
         return cls(
             name=parsed,
             source=source,
             match_mode=match_mode or mode,
             suppress_ipv6=suppress_ipv6,
+            route_policy=policy,
         )
 
 
@@ -289,6 +341,7 @@ class StaticPrefix:
     id: int | None = None
     name: str | None = None
     enabled: bool = True
+    route_policy: RoutePolicy = "vpn"
     created_at: datetime | None = None
 
     def __post_init__(self) -> None:
@@ -296,6 +349,7 @@ class StaticPrefix:
         if net.version != 4:
             raise ValueError(f"IPv6 is not enabled: {self.cidr}")
         object.__setattr__(self, "cidr", str(net))
+        object.__setattr__(self, "route_policy", _normalize_route_policy(self.route_policy))
 
 
 @dataclass(frozen=True, slots=True)

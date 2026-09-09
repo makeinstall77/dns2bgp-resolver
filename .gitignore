@@ -18,3 +18,4 @@ data/
 htmlcov/
 *.routes
 .cursorrules
+local/

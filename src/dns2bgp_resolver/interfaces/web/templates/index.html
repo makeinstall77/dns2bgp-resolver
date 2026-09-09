@@ -44,9 +44,18 @@
     }
     form.add {
       display: grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns: 1fr auto auto;
       gap: 0.65rem;
       margin-bottom: 1.75rem;
+    }
+    select.route {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.7rem 0.85rem;
+      border-radius: 6px;
+      font-family: var(--mono);
+      font-size: 0.9rem;
     }
     input[type="text"], input[type="password"] {
       background: var(--panel);
@@ -134,6 +143,10 @@
     <form class="add" method="post" action="/ui/add">
       <input type="hidden" name="api_key" id="api_key_add" value="" />
       <input type="text" name="name" placeholder="example.com" required autofocus />
+      <select class="route" name="route_policy">
+        <option value="vpn">vpn</option>
+        <option value="direct">direct</option>
+      </select>
       <button type="submit">Add domain</button>
     </form>
 
@@ -147,6 +160,7 @@
       <thead>
         <tr>
           <th>Domain</th>
+          <th>Route</th>
           <th>Addresses</th>
           <th></th>
         </tr>
@@ -157,6 +171,15 @@
           <td>
             {{ d.name }}
             {% if d.last_error %}<div class="err">{{ d.last_error }}</div>{% endif %}
+          </td>
+          <td>
+            <form method="post" action="/ui/route" style="margin:0">
+              <input type="hidden" name="domain_id" value="{{ d.id }}" />
+              <input type="hidden" name="api_key" class="api_key_rm" value="" />
+              <button type="submit" style="background:transparent;color:var(--muted);border:1px solid var(--border);padding:0.25rem 0.5rem;font-size:0.8rem">
+                {{ d.route_policy }}
+              </button>
+            </form>
           </td>
           <td class="ips">
             {% if d.addresses %}{{ d.addresses | join(", ") }}{% else %}—{% endif %}
