@@ -2,7 +2,7 @@
 
 [English](README.md) | [Русский](README.ru.md)
 
-Резолвит список доменов в IPv4-адреса и публикует их как static-маршруты bird для направления трафика в VPN.
+Резолвит список доменов в IPv4-адреса и публикует их как static-маршруты bird для политики маршрутизации.
 
 CLI, Telegram-бот и веб-UI работают через одну шину команд. Хранение — через порт репозитория (по умолчанию SQLite; PostgreSQL — тот же адаптер SQLAlchemy, другой URL).
 
@@ -197,7 +197,7 @@ pip install 'dns2bgp-resolver[postgres]'
 
 ## IPv6
 
-BGP-пул остаётся только IPv4/`A`. Dual-stack сайты предпочитают AAAA и обходят VPN — используйте **suppress**, чтобы клиенты не получали AAAA для перечисленных доменов.
+BGP-пул остаётся только IPv4/`A`. Dual-stack клиенты предпочитают AAAA и могут не использовать IPv4-пул маршрутов — используйте **suppress**, чтобы клиенты не получали AAAA для перечисленных доменов.
 
 ```yaml
 ipv6:
@@ -213,7 +213,7 @@ ipv6:
 
 - **`off`** — без политики IPv6 (по умолчанию).
 - **`suppress`** — после каждой пересборки DomainIndex пишет список доменов и best-effort reload dnsdist. dnsdist перед unbound; AAAA (и желательно HTTPS/SVCB) для совпавших имён → NODATA. Пример: [deploy/dnsdist.example.conf](deploy/dnsdist.example.conf).
-- **`announce`** — заготовка на потом: собирать AAAA и экспортировать Bird IPv6, когда VPN это поддерживает. Тот же DomainIndex; без suppress в dnsdist.
+- **`announce`** — заготовка на потом: собирать AAAA и экспортировать Bird IPv6, когда включён IPv6-export. Тот же DomainIndex; без suppress в dnsdist.
 
 Проверка:
 

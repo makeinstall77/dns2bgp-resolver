@@ -52,7 +52,7 @@ dnstap:
   socket_mode: 438
 
 # IPv6: off | suppress | announce
-# suppress — export DomainIndex for dnsdist AAAA NODATA (VPN IPv4-only).
+# suppress — export DomainIndex for dnsdist AAAA NODATA (IPv4-only route pool).
 # announce — reserved for future Bird IPv6 export (stub).
 # See deploy/dnsdist.example.conf
 ipv6:
