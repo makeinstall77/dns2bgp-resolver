@@ -2,7 +2,7 @@
 
 [English](README.md) | [Русский](README.ru.md)
 
-Resolve a list of domains into IPv4 addresses and publish them as bird static routes for VPN traffic steering.
+Resolve a list of domains into IPv4 addresses and publish them as bird static routes for policy-based routing.
 
 CLI, Telegram bot, and web UI all talk to the same command bus. Persistence goes through a repository port (SQLite by default; PostgreSQL via the same SQLAlchemy adapter and a different URL).
 
@@ -197,7 +197,7 @@ No changes to the command layer — same `DomainRepository` port.
 
 ## IPv6
 
-BGP pool remains IPv4/`A` only. Dual-stack sites prefer AAAA and bypass the VPN — use **suppress** so clients never get AAAA for listed domains.
+BGP pool remains IPv4/`A` only. Dual-stack clients prefer AAAA and may ignore the IPv4 route pool — use **suppress** so clients never get AAAA for listed domains.
 
 ```yaml
 ipv6:
@@ -213,7 +213,7 @@ Put the dnsdist console key in `/etc/dns2bgp/dnsdist.key` (readable by `dns2bgp`
 
 - **`off`** — no IPv6 policy (default).
 - **`suppress`** — after each DomainIndex rebuild, write the domain list and best-effort reload dnsdist. Put dnsdist in front of unbound; AAAA (and preferably HTTPS/SVCB) for matched names → NODATA. Example: [deploy/dnsdist.example.conf](deploy/dnsdist.example.conf).
-- **`announce`** — stub for later: collect AAAA and export Bird IPv6 when the VPN supports it. Same DomainIndex; no dnsdist suppress.
+- **`announce`** — stub for later: collect AAAA and export Bird IPv6 when IPv6 export is enabled. Same DomainIndex; no dnsdist suppress.
 
 Check:
 

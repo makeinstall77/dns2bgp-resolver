@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "dns2bgp-resolver"
 version = "0.3.0"
-description = "Resolve domains into a BGP route pool for VPN traffic steering"
+description = "Resolve domains into a BGP route pool for policy-based routing"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"

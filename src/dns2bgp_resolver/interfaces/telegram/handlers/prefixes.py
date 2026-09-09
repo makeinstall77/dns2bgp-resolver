@@ -99,7 +99,7 @@ async def cb_add(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
         await ui.edit(
             callback.message,
             "Введите IPv4 или CIDR (например 149.154.160.0/20).\n"
-            "Префикс `direct:` — исключение (не в VPN bird).\n"
+            "Префикс `direct:` — исключение (не в bird-пуле).\n"
             "Можно несколько строк сразу.",
             reply_markup=_CANCEL,
         )
