@@ -72,8 +72,8 @@ def _normalize_suppress_ipv6(raw: object) -> str:
 
 
 def _normalize_route_policy(raw: object) -> str:
-    text = str(raw or "vpn").strip().lower()
-    return "direct" if text == "direct" else "vpn"
+    text = str(raw or "announce").strip().lower()
+    return "direct" if text == "direct" else "announce"
 
 
 def _row_to_domain(row: DomainRow) -> Domain:
@@ -85,7 +85,7 @@ def _row_to_domain(row: DomainRow) -> Domain:
         enabled=row.enabled,
         match_mode=getattr(row, "match_mode", None) or "suffix",  # type: ignore[arg-type]
         suppress_ipv6=_normalize_suppress_ipv6(getattr(row, "suppress_ipv6", "default")),  # type: ignore[arg-type]
-        route_policy=_normalize_route_policy(getattr(row, "route_policy", "vpn")),  # type: ignore[arg-type]
+        route_policy=_normalize_route_policy(getattr(row, "route_policy", "announce")),  # type: ignore[arg-type]
         created_at=_ensure_aware(row.created_at),
         next_resolve_at=_ensure_aware(row.next_resolve_at),
         last_resolved_at=_ensure_aware(row.last_resolved_at),
@@ -102,7 +102,7 @@ def _row_to_static_prefix(row: StaticPrefixRow) -> StaticPrefix:
         cidr=row.cidr,
         name=row.name,
         enabled=row.enabled,
-        route_policy=_normalize_route_policy(getattr(row, "route_policy", "vpn")),  # type: ignore[arg-type]
+        route_policy=_normalize_route_policy(getattr(row, "route_policy", "announce")),  # type: ignore[arg-type]
         created_at=_ensure_aware(row.created_at),
     )
 
@@ -208,7 +208,7 @@ class SqlAlchemyDomainRepository(DomainRepository):
                     await conn.execute(
                         text(
                             "ALTER TABLE domains ADD COLUMN route_policy VARCHAR(8) "
-                            "NOT NULL DEFAULT 'vpn'"
+                            "NOT NULL DEFAULT 'announce'"
                         )
                     )
                 result = await conn.execute(text("PRAGMA table_info(static_prefixes)"))
@@ -217,7 +217,7 @@ class SqlAlchemyDomainRepository(DomainRepository):
                     await conn.execute(
                         text(
                             "ALTER TABLE static_prefixes ADD COLUMN route_policy VARCHAR(8) "
-                            "NOT NULL DEFAULT 'vpn'"
+                            "NOT NULL DEFAULT 'announce'"
                         )
                     )
             elif conn.dialect.name == "postgresql":
@@ -305,7 +305,7 @@ class SqlAlchemyDomainRepository(DomainRepository):
                     await conn.execute(
                         text(
                             "ALTER TABLE domains ADD COLUMN route_policy VARCHAR(8) "
-                            "NOT NULL DEFAULT 'vpn'"
+                            "NOT NULL DEFAULT 'announce'"
                         )
                     )
                 result = await conn.execute(
@@ -319,9 +319,20 @@ class SqlAlchemyDomainRepository(DomainRepository):
                     await conn.execute(
                         text(
                             "ALTER TABLE static_prefixes ADD COLUMN route_policy "
-                            "VARCHAR(8) NOT NULL DEFAULT 'vpn'"
+                            "VARCHAR(8) NOT NULL DEFAULT 'announce'"
                         )
                     )
+
+            # Legacy route_policy value 'vpn' → 'announce' (both dialects).
+            await conn.execute(
+                text("UPDATE domains SET route_policy = 'announce' WHERE route_policy = 'vpn'")
+            )
+            await conn.execute(
+                text(
+                    "UPDATE static_prefixes SET route_policy = 'announce' "
+                    "WHERE route_policy = 'vpn'"
+                )
+            )
 
     async def close(self) -> None:
         await self._engine.dispose()
@@ -459,7 +470,7 @@ class SqlAlchemyDomainRepository(DomainRepository):
                     text(
                         "INSERT INTO domains (name, source, list_id, enabled, match_mode, "
                         "suppress_ipv6, route_policy) "
-                        "SELECT t.name, 'auto', :list_id, 1, 'suffix', 'default', 'vpn' "
+                        "SELECT t.name, 'auto', :list_id, 1, 'suffix', 'default', 'announce' "
                         "FROM sync_target t "
                         "WHERE NOT EXISTS (SELECT 1 FROM domains d WHERE d.name = t.name)"
                     ),
@@ -515,7 +526,7 @@ class SqlAlchemyDomainRepository(DomainRepository):
                     text(
                         "INSERT INTO domains (name, source, enabled, match_mode, "
                         "suppress_ipv6, route_policy) "
-                        "SELECT t.name, 'auto', 1, 'suffix', 'default', 'vpn' "
+                        "SELECT t.name, 'auto', 1, 'suffix', 'default', 'announce' "
                         "FROM sync_target t "
                         "WHERE NOT EXISTS (SELECT 1 FROM domains d WHERE d.name = t.name)"
                     )

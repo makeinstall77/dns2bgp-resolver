@@ -17,6 +17,8 @@ from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.domain import format_domain_label, resolve_ipv6_suppress
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
 from dns2bgp_resolver.interfaces.telegram.keyboards import (
+    add_ipv6_options_menu,
+    add_route_options_menu,
     cancel_inline,
     confirm_remove_host_menu,
     domains_menu,
@@ -93,8 +95,10 @@ def _host_text(domain, *, manual_default: bool) -> str:
         v6 = "AAAA выкл / блокируем"
     else:
         v6 = "AAAA вкл / отдаём"
-    route = getattr(domain, "route_policy", None) or "vpn"
-    route_line = "route: direct (исключение)" if route == "direct" else "route: vpn"
+    route = getattr(domain, "route_policy", None) or "announce"
+    route_line = (
+        "route: direct (исключение)" if route == "direct" else "route: announce (bird)"
+    )
     if mode == "suffix":
         return (
             f"🌐 {label}\nmatch: suffix (поддомены через dnstap)\n"
@@ -111,7 +115,7 @@ def _host_menu(domain, page: int):
         page,
         is_mask=mode == "suffix",
         suppress_ipv6=getattr(domain, "suppress_ipv6", None) or "default",
-        route_policy=getattr(domain, "route_policy", None) or "vpn",
+        route_policy=getattr(domain, "route_policy", None) or "announce",
     )
 
 
@@ -332,8 +336,9 @@ async def cb_add(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
         await ui.edit(
             callback.message,
             "Домен или маска:\nexample.com / *.example.com\n"
-            "Префикс `direct:` — исключение (не в bird-пуле).\n"
-            "Можно несколько строк сразу.",
+            "Префикс `direct:` — исключение на строку (не в bird-пуле).\n"
+            "Можно несколько строк сразу.\n"
+            "После ввода спрошу режим announce/direct и IPv6.",
             reply_markup=_CANCEL,
         )
     await callback.answer()
@@ -351,44 +356,69 @@ async def cb_remove(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> No
     await callback.answer()
 
 
-@router.message(AddDomain.waiting_name, F.text)
-async def add_domain_text(
-    message: Message, container: AppContainer, state: FSMContext, ui: BotUi
+def _parse_domain_lines(text: str) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    for ln in text.splitlines():
+        raw = ln.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        force_direct = False
+        name = raw
+        if name.lower().startswith("direct:"):
+            force_direct = True
+            name = name.split(":", 1)[1].strip()
+        items.append({"name": name, "force_direct": force_direct})
+    return items
+
+
+async def _commit_pending_domains(
+    *,
+    container: AppContainer,
+    state: FSMContext,
+    message: Message,
+    ui: BotUi,
+    route_policy: str,
+    suppress_ipv6: str,
 ) -> None:
-    lines = [
-        ln.strip()
-        for ln in (message.text or "").splitlines()
-        if ln.strip() and not ln.strip().startswith("#")
-    ]
-    if not lines:
-        await ui.reply(message, "Введите домен или маску.", reply_markup=_CANCEL)
+    data = await state.get_data()
+    pending: list[dict[str, object]] = list(data.get("pending_domains") or [])
+    await state.update_data(pending_domains=None, pending_route=None)
+    await state.set_state(AddDomain.waiting_name)
+
+    if not pending:
+        await ui.reply(message, "Нечего добавлять.", reply_markup=_CANCEL)
         return
 
     added = 0
     last_text = ""
     errors: list[str] = []
-    for raw in lines:
-        policy = "vpn"
-        name = raw
-        if name.lower().startswith("direct:"):
-            policy = "direct"
-            name = name.split(":", 1)[1].strip()
+    for item in pending:
+        name = str(item["name"])
+        policy = "direct" if item.get("force_direct") else route_policy
         result = await container.bus.execute(
-            AddDomainCommand(name=name, route_policy=policy)
+            AddDomainCommand(
+                name=name, route_policy=policy, suppress_ipv6=suppress_ipv6
+            )
         )
         if result.ok:
             added += 1
             view = result.data
             label = view.label if view else name
             if view and view.match_mode == "suffix":
-                last_text = f"Added {label} [{view.route_policy}]"
+                last_text = (
+                    f"Added {label} [{view.route_policy}, ipv6={view.suppress_ipv6}]"
+                )
             else:
                 ips = ", ".join(view.addresses) if view and view.addresses else "-"
-                last_text = f"Added {label}: {ips} [{view.route_policy if view else policy}]"
+                last_text = (
+                    f"Added {label}: {ips} "
+                    f"[{view.route_policy if view else policy}, "
+                    f"ipv6={view.suppress_ipv6 if view else suppress_ipv6}]"
+                )
         else:
             errors.append(f"{name}: {result.error}")
 
-    if len(lines) == 1 and added == 1:
+    if len(pending) == 1 and added == 1:
         await ui.reply(
             message,
             f"{last_text}\nЕщё домен (можно несколько строк) или ◀ Отмена:",
@@ -396,13 +426,97 @@ async def add_domain_text(
         )
         return
 
-    parts = [f"Добавлено: {added}/{len(lines)}"]
+    parts = [f"Добавлено: {added}/{len(pending)}"]
     if errors:
         parts.append("Ошибки:\n" + "\n".join(f"• {e}" for e in errors[:10]))
         if len(errors) > 10:
             parts.append(f"… и ещё {len(errors) - 10}")
     parts.append("Ещё домен (можно несколько строк) или ◀ Отмена:")
     await ui.reply(message, "\n".join(parts), reply_markup=_CANCEL)
+
+
+@router.message(AddDomain.waiting_name, F.text)
+async def add_domain_text(
+    message: Message, container: AppContainer, state: FSMContext, ui: BotUi
+) -> None:
+    items = _parse_domain_lines(message.text or "")
+    if not items:
+        await ui.reply(message, "Введите домен или маску.", reply_markup=_CANCEL)
+        return
+
+    await state.update_data(pending_domains=items)
+    await state.set_state(AddDomain.waiting_route)
+    count = len(items)
+    hint = f"для {count} запис(ей)" if count > 1 else "для домена"
+    await ui.reply(
+        message,
+        f"Режим анонсирования {hint} (announce = в bird-пуле, direct = исключение):",
+        reply_markup=add_route_options_menu("dadd:rt"),
+    )
+
+
+@router.callback_query(AddDomain.waiting_route, F.data.startswith("dadd:rt:"))
+async def cb_add_domain_route(
+    callback: CallbackQuery, state: FSMContext, ui: BotUi
+) -> None:
+    choice = (callback.data or "").rsplit(":", 1)[-1]
+    if choice == "cancel":
+        await state.update_data(pending_domains=None, pending_route=None)
+        await state.set_state(AddDomain.waiting_name)
+        if callback.message:
+            await ui.edit(
+                callback.message,
+                "Отменено. Ещё домен или ◀ Отмена:",
+                reply_markup=_CANCEL,
+            )
+        await callback.answer("Отменено")
+        return
+    if choice not in ("announce", "direct"):
+        await callback.answer("Invalid")
+        return
+    await state.update_data(pending_route=choice)
+    await state.set_state(AddDomain.waiting_ipv6)
+    if callback.message:
+        await ui.edit(
+            callback.message,
+            f"Route: {choice}. IPv6 / AAAA для добавляемых доменов:",
+            reply_markup=add_ipv6_options_menu("dadd:v6"),
+        )
+    await callback.answer()
+
+
+@router.callback_query(AddDomain.waiting_ipv6, F.data.startswith("dadd:v6:"))
+async def cb_add_domain_ipv6(
+    callback: CallbackQuery, container: AppContainer, state: FSMContext, ui: BotUi
+) -> None:
+    choice = (callback.data or "").rsplit(":", 1)[-1]
+    if choice == "cancel":
+        await state.update_data(pending_domains=None, pending_route=None)
+        await state.set_state(AddDomain.waiting_name)
+        if callback.message:
+            await ui.edit(
+                callback.message,
+                "Отменено. Ещё домен или ◀ Отмена:",
+                reply_markup=_CANCEL,
+            )
+        await callback.answer("Отменено")
+        return
+    if choice not in ("default", "on", "off"):
+        await callback.answer("Invalid")
+        return
+    data = await state.get_data()
+    route_policy = str(data.get("pending_route") or "announce")
+    await callback.answer()
+    if callback.message:
+        await ui.edit(callback.message, "⏳ Добавляю…")
+        await _commit_pending_domains(
+            container=container,
+            state=state,
+            message=callback.message,  # type: ignore[arg-type]
+            ui=ui,
+            route_policy=route_policy,
+            suppress_ipv6=choice,
+        )
 
 
 @router.message(RemoveDomain.waiting_name, F.text)

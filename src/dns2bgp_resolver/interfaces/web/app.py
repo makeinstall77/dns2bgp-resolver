@@ -39,13 +39,14 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 class DomainCreate(BaseModel):
     name: str = Field(min_length=1, max_length=253)
-    route_policy: str = "vpn"
+    route_policy: str = "announce"
+    suppress_ipv6: str = "default"
 
 
 class PrefixCreate(BaseModel):
     cidr: str = Field(min_length=1, max_length=43)
     name: str | None = None
-    route_policy: str = "vpn"
+    route_policy: str = "announce"
 
 
 class KeywordCreate(BaseModel):
@@ -334,13 +335,17 @@ def create_app(container: AppContainer) -> FastAPI:
     async def ui_add(
         name: Annotated[str, Form()],
         api_key: Annotated[str, Form()] = "",
-        route_policy: Annotated[str, Form()] = "vpn",
+        route_policy: Annotated[str, Form()] = "announce",
+        suppress_ipv6: Annotated[str, Form()] = "default",
     ) -> RedirectResponse:
         if container.settings.web.api_key and api_key != container.settings.web.api_key:
             raise HTTPException(status_code=401, detail="invalid api key")
-        policy = "direct" if route_policy.strip().lower() == "direct" else "vpn"
         result = await container.bus.execute(
-            AddDomainCommand(name=name.strip(), route_policy=policy)
+            AddDomainCommand(
+                name=name.strip(),
+                route_policy=route_policy,
+                suppress_ipv6=suppress_ipv6,
+            )
         )
         if not result.ok:
             return RedirectResponse(url=f"/?error={result.error}", status_code=303)
@@ -421,9 +426,12 @@ def create_app(container: AppContainer) -> FastAPI:
 
     @app.post("/api/domains", status_code=201)
     async def api_add(body: DomainCreate, _: Auth):
-        policy = "direct" if body.route_policy == "direct" else "vpn"
         result = await container.bus.execute(
-            AddDomainCommand(name=body.name, route_policy=policy)
+            AddDomainCommand(
+                name=body.name,
+                route_policy=body.route_policy,
+                suppress_ipv6=body.suppress_ipv6,
+            )
         )
         if not result.ok:
             raise HTTPException(status_code=400, detail=result.error)
@@ -502,9 +510,8 @@ def create_app(container: AppContainer) -> FastAPI:
 
     @app.post("/api/prefixes", status_code=201)
     async def api_add_prefix(body: PrefixCreate, _: Auth):
-        policy = "direct" if body.route_policy == "direct" else "vpn"
         result = await container.bus.execute(
-            AddPrefixCommand(cidr=body.cidr, name=body.name, route_policy=policy)
+            AddPrefixCommand(cidr=body.cidr, name=body.name, route_policy=body.route_policy)
         )
         if not result.ok:
             raise HTTPException(status_code=400, detail=result.error)

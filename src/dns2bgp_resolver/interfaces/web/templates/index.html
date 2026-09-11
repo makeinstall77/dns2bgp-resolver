@@ -144,8 +144,13 @@
       <input type="hidden" name="api_key" id="api_key_add" value="" />
       <input type="text" name="name" placeholder="example.com" required autofocus />
       <select class="route" name="route_policy">
-        <option value="vpn">vpn</option>
+        <option value="announce">announce</option>
         <option value="direct">direct</option>
+      </select>
+      <select class="route" name="suppress_ipv6" title="IPv6 / AAAA">
+        <option value="default">AAAA default</option>
+        <option value="off">AAAA on</option>
+        <option value="on">AAAA off</option>
       </select>
       <button type="submit">Add domain</button>
     </form>

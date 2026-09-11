@@ -14,7 +14,7 @@ def normalize_qname(name: str) -> str:
 @dataclass(frozen=True, slots=True)
 class IndexMatch:
     name: str
-    route_policy: RoutePolicy = "vpn"
+    route_policy: RoutePolicy = "announce"
 
 
 class DomainIndex:
@@ -39,7 +39,7 @@ class DomainIndex:
         *,
         rules: Iterable[tuple] | None = None,
     ) -> int:
-        """Rebuild from bare names (all suffix/vpn) or (name, mode[, policy]) rules."""
+        """Rebuild from bare names (all suffix/announce) or (name, mode[, policy]) rules."""
         exact: dict[str, RoutePolicy] = {}
         suffix: dict[str, RoutePolicy] = {}
         source = rules if rules is not None else names or ()
@@ -48,7 +48,7 @@ class DomainIndex:
                 raw = item[0]
                 mode = item[1] if len(item) > 1 else "suffix"
                 policy: RoutePolicy = (
-                    "direct" if len(item) > 2 and item[2] == "direct" else "vpn"
+                    "direct" if len(item) > 2 and item[2] == "direct" else "announce"
                 )
                 n = normalize_qname(str(raw))
                 if not n or "." not in n:
@@ -59,7 +59,7 @@ class DomainIndex:
             else:
                 n = normalize_qname(item)
                 if n and "." in n:
-                    suffix[n] = "vpn"
+                    suffix[n] = "announce"
         with self._lock:
             self._exact = exact
             self._suffix = suffix

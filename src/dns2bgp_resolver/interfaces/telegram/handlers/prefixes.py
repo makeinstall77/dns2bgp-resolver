@@ -14,6 +14,7 @@ from dns2bgp_resolver.application.services.list_parse import format_prefixes_exp
 from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
 from dns2bgp_resolver.interfaces.telegram.keyboards import (
+    add_route_options_menu,
     cancel_inline,
     prefixes_list_keyboard,
     prefixes_menu,
@@ -41,7 +42,7 @@ async def _render_prefix_page(container: AppContainer, page: int) -> tuple[str, 
         )
     text = (
         f"🛣 Prefixes — стр. {data.page}/{data.pages} ({data.total})\n"
-        "🛡/🔀 — toggle vpn/direct; 🗑 — удалить"
+        "🛡/🔀 — toggle announce/direct; 🗑 — удалить"
     )
     items = [
         (p.id or 0, p.cidr, p.name, p.route_policy)
@@ -99,8 +100,9 @@ async def cb_add(callback: CallbackQuery, state: FSMContext, ui: BotUi) -> None:
         await ui.edit(
             callback.message,
             "Введите IPv4 или CIDR (например 149.154.160.0/20).\n"
-            "Префикс `direct:` — исключение (не в bird-пуле).\n"
-            "Можно несколько строк сразу.",
+            "Префикс `direct:` — исключение на строку (не в bird-пуле).\n"
+            "Можно несколько строк сразу.\n"
+            "После ввода спрошу режим announce/direct.",
             reply_markup=_CANCEL,
         )
     await callback.answer()
@@ -170,33 +172,51 @@ async def cb_remove_ok(callback: CallbackQuery, container: AppContainer, ui: Bot
     await callback.answer(result.message or "Removed")
 
 
-@router.message(AddPrefix.waiting_cidr, F.text)
-async def add_prefix_text(
-    message: Message, container: AppContainer, state: FSMContext, ui: BotUi
+def _parse_prefix_lines(text: str) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    for ln in text.splitlines():
+        raw = ln.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        force_direct = False
+        cidr = raw
+        name = None
+        if cidr.lower().startswith("direct:"):
+            force_direct = True
+            cidr = cidr.split(":", 1)[1].strip()
+        if " " in cidr:
+            cidr, name = cidr.split(None, 1)
+        items.append({"cidr": cidr, "name": name, "force_direct": force_direct})
+    return items
+
+
+async def _commit_pending_prefixes(
+    *,
+    container: AppContainer,
+    state: FSMContext,
+    message: Message,
+    ui: BotUi,
+    route_policy: str,
 ) -> None:
-    lines = [
-        ln.strip()
-        for ln in (message.text or "").splitlines()
-        if ln.strip() and not ln.strip().startswith("#")
-    ]
-    if not lines:
-        await ui.reply(message, "Введите IPv4 или CIDR.", reply_markup=_CANCEL)
+    data = await state.get_data()
+    pending: list[dict[str, object]] = list(data.get("pending_prefixes") or [])
+    await state.update_data(pending_prefixes=None)
+    await state.set_state(AddPrefix.waiting_cidr)
+
+    if not pending:
+        await ui.reply(message, "Нечего добавлять.", reply_markup=_CANCEL)
         return
 
     added = 0
     last_ok = ""
     errors: list[str] = []
-    for raw in lines:
-        name = None
-        cidr = raw
-        policy = "vpn"
-        if cidr.lower().startswith("direct:"):
-            policy = "direct"
-            cidr = cidr.split(":", 1)[1].strip()
-        if " " in cidr:
-            cidr, name = cidr.split(None, 1)
+    for item in pending:
+        cidr = str(item["cidr"])
+        name = item.get("name")
+        name_s = str(name) if name else None
+        policy = "direct" if item.get("force_direct") else route_policy
         result = await container.bus.execute(
-            AddPrefixCommand(cidr=cidr, name=name, route_policy=policy)
+            AddPrefixCommand(cidr=cidr, name=name_s, route_policy=policy)
         )
         if result.ok:
             added += 1
@@ -204,7 +224,7 @@ async def add_prefix_text(
         else:
             errors.append(f"{cidr}: {result.error}")
 
-    if len(lines) == 1 and added == 1:
+    if len(pending) == 1 and added == 1:
         await ui.reply(
             message,
             f"{last_ok}\nЕщё CIDR (можно несколько строк) или ◀ Отмена:",
@@ -212,13 +232,64 @@ async def add_prefix_text(
         )
         return
 
-    parts = [f"Добавлено: {added}/{len(lines)}"]
+    parts = [f"Добавлено: {added}/{len(pending)}"]
     if errors:
         parts.append("Ошибки:\n" + "\n".join(f"• {e}" for e in errors[:10]))
         if len(errors) > 10:
             parts.append(f"… и ещё {len(errors) - 10}")
     parts.append("Ещё CIDR (можно несколько строк) или ◀ Отмена:")
     await ui.reply(message, "\n".join(parts), reply_markup=_CANCEL)
+
+
+@router.message(AddPrefix.waiting_cidr, F.text)
+async def add_prefix_text(
+    message: Message, container: AppContainer, state: FSMContext, ui: BotUi
+) -> None:
+    items = _parse_prefix_lines(message.text or "")
+    if not items:
+        await ui.reply(message, "Введите IPv4 или CIDR.", reply_markup=_CANCEL)
+        return
+
+    await state.update_data(pending_prefixes=items)
+    await state.set_state(AddPrefix.waiting_route)
+    count = len(items)
+    hint = f"для {count} запис(ей)" if count > 1 else "для префикса"
+    await ui.reply(
+        message,
+        f"Режим анонсирования {hint} (announce = в bird-пуле, direct = исключение):",
+        reply_markup=add_route_options_menu("padd:rt"),
+    )
+
+
+@router.callback_query(AddPrefix.waiting_route, F.data.startswith("padd:rt:"))
+async def cb_add_prefix_route(
+    callback: CallbackQuery, container: AppContainer, state: FSMContext, ui: BotUi
+) -> None:
+    choice = (callback.data or "").rsplit(":", 1)[-1]
+    if choice == "cancel":
+        await state.update_data(pending_prefixes=None)
+        await state.set_state(AddPrefix.waiting_cidr)
+        if callback.message:
+            await ui.edit(
+                callback.message,
+                "Отменено. Ещё CIDR или ◀ Отмена:",
+                reply_markup=_CANCEL,
+            )
+        await callback.answer("Отменено")
+        return
+    if choice not in ("announce", "direct"):
+        await callback.answer("Invalid")
+        return
+    await callback.answer()
+    if callback.message:
+        await ui.edit(callback.message, "⏳ Добавляю…")
+        await _commit_pending_prefixes(
+            container=container,
+            state=state,
+            message=callback.message,  # type: ignore[arg-type]
+            ui=ui,
+            route_policy=choice,
+        )
 
 
 @router.message(RemovePrefix.waiting_cidr, F.text)

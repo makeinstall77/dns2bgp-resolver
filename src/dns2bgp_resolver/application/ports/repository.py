@@ -241,13 +241,13 @@ class DomainRepository(ABC):
 
     @abstractmethod
     async def set_route_policy(self, domain_id: int, policy: str) -> Domain | None:
-        """Set route_policy vpn|direct (manual only for direct). Return None if missing/denied."""
+        """Set route_policy announce|direct (manual only for direct). Return None if missing/denied."""
 
     @abstractmethod
     async def set_static_prefix_route_policy(
         self, prefix_id: int, policy: str
     ) -> StaticPrefix | None:
-        """Set static prefix route_policy vpn|direct."""
+        """Set static prefix route_policy announce|direct."""
 
     @abstractmethod
     async def replace_addresses(
