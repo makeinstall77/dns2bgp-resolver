@@ -7,7 +7,7 @@ from dns2bgp_resolver.application.commands.dto import CommandResult
 from dns2bgp_resolver.application.errors import DomainAlreadyExistsError
 from dns2bgp_resolver.application.ports.repository import DomainRepository
 from dns2bgp_resolver.application.services.resolve_pipeline import ResolvePipeline
-from dns2bgp_resolver.domain import StaticPrefix, is_announcable_prefix
+from dns2bgp_resolver.domain import StaticPrefix, is_announcable_prefix, normalize_route_policy
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,7 +16,7 @@ class PrefixView:
     name: str | None
     enabled: bool
     id: int | None = None
-    route_policy: str = "vpn"
+    route_policy: str = "announce"
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,7 +32,7 @@ class PrefixPageView:
 class AddPrefixCommand:
     cidr: str
     name: str | None = None
-    route_policy: str = "vpn"
+    route_policy: str = "announce"
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +52,7 @@ class AddPrefixHandler:
         self._pipeline = pipeline
 
     async def handle(self, command: AddPrefixCommand) -> CommandResult[PrefixView]:
-        policy = "direct" if command.route_policy == "direct" else "vpn"
+        policy = normalize_route_policy(command.route_policy)
         try:
             prefix = StaticPrefix(
                 cidr=command.cidr, name=command.name, route_policy=policy

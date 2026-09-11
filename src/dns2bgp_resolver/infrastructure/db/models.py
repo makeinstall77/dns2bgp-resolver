@@ -59,7 +59,7 @@ class DomainRow(Base):
         String(8), nullable=False, default="default", server_default="default"
     )
     route_policy: Mapped[str] = mapped_column(
-        String(8), nullable=False, default="vpn", server_default="vpn"
+        String(8), nullable=False, default="announce", server_default="announce"
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -86,7 +86,7 @@ class StaticPrefixRow(Base):
     name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     route_policy: Mapped[str] = mapped_column(
-        String(8), nullable=False, default="vpn", server_default="vpn"
+        String(8), nullable=False, default="announce", server_default="announce"
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

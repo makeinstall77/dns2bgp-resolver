@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from dns2bgp_resolver.application.commands.add_domain import AddDomainCommand, AddDomainHandler
 from dns2bgp_resolver.application.services.domain_index_service import DomainIndexService
 from dns2bgp_resolver.application.services.passive_dns import PassiveDnsCollector
 from dns2bgp_resolver.application.services.resolve_pipeline import ResolvePipeline
@@ -15,6 +16,7 @@ from dns2bgp_resolver.domain import (
     IpAddress,
     ResolvedAddress,
     StaticPrefix,
+    normalize_route_policy,
     summarize_prefixes,
 )
 from dns2bgp_resolver.domain.domain_index import DomainIndex
@@ -62,11 +64,18 @@ def _pipeline(repo, tmp_path: Path, resolver=None) -> ResolvePipeline:
     )
 
 
-def test_index_direct_wins_over_vpn_suffix():
+def test_normalize_route_policy_legacy_vpn():
+    assert normalize_route_policy("vpn") == "announce"
+    assert normalize_route_policy("announce") == "announce"
+    assert normalize_route_policy("direct") == "direct"
+    assert normalize_route_policy(None) == "announce"
+
+
+def test_index_direct_wins_over_announce_suffix():
     idx = DomainIndex()
     idx.rebuild(
         rules=[
-            ("example.com", "suffix", "vpn"),
+            ("example.com", "suffix", "announce"),
             ("cdn.example.com", "exact", "direct"),
         ]
     )
@@ -76,14 +85,14 @@ def test_index_direct_wins_over_vpn_suffix():
     assert hit.name == "cdn.example.com"
     parent = idx.matches("www.example.com")
     assert parent is not None
-    assert parent.route_policy == "vpn"
+    assert parent.route_policy == "announce"
     assert parent.name == "example.com"
 
 
 def test_summarize_excludes_direct_from_aggregate():
-    vpn = ["1.2.3.1/32", "1.2.3.2/32", "1.2.3.4/32"]
+    pool = ["1.2.3.1/32", "1.2.3.2/32", "1.2.3.4/32"]
     direct = ["1.2.3.4/32"]
-    out = summarize_prefixes(vpn, exclude=direct)
+    out = summarize_prefixes(pool, exclude=direct)
     assert "1.2.3.0/24" not in out
     assert "1.2.3.4/32" not in out
     assert "1.2.3.1/32" in out
@@ -91,9 +100,9 @@ def test_summarize_excludes_direct_from_aggregate():
 
 
 def test_summarize_punches_static_direct_hole():
-    vpn = ["1.2.3.0/24"]
+    pool = ["1.2.3.0/24"]
     direct = ["1.2.3.10/32"]
-    out = summarize_prefixes(vpn, exclude=direct)
+    out = summarize_prefixes(pool, exclude=direct)
     assert "1.2.3.0/24" not in out
     assert "1.2.3.10/32" not in out
     joined = " ".join(out)
@@ -103,7 +112,7 @@ def test_summarize_punches_static_direct_hole():
 @pytest.mark.asyncio
 async def test_export_subtracts_direct_static(repo, tmp_path: Path):
     pipe = _pipeline(repo, tmp_path)
-    await repo.add_static_prefix(StaticPrefix(cidr="8.8.8.0/24", name="vpn-pool"))
+    await repo.add_static_prefix(StaticPrefix(cidr="8.8.8.0/24", name="announce-pool"))
     await repo.add_static_prefix(
         StaticPrefix(cidr="8.8.8.8/32", name="exception", route_policy="direct")
     )
@@ -118,15 +127,15 @@ async def test_export_subtracts_direct_static(repo, tmp_path: Path):
 async def test_cdn_collision_direct_domain_wins(repo, tmp_path: Path):
     resolver = FakeDns(
         {
-            "vpn.example": ["1.1.1.1"],
+            "ann.example": ["1.1.1.1"],
             "direct.example": ["1.1.1.1"],
         }
     )
     pipe = _pipeline(repo, tmp_path, resolver=resolver)
-    vpn = await repo.add(Domain.create("vpn.example", route_policy="vpn"))
+    announced = await repo.add(Domain.create("ann.example", route_policy="announce"))
     direct = await repo.add(Domain.create("direct.example", route_policy="direct"))
     await repo.replace_addresses(
-        vpn.id,
+        announced.id,
         [ResolvedAddress(ip=IpAddress("1.1.1.1"), ttl_seconds=60)],
         resolved_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         next_resolve_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
@@ -157,17 +166,57 @@ async def test_passive_skips_direct_match(repo, tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_index_rebuild_carries_route_policy(repo):
-    await repo.add(Domain.create("vpn.example", route_policy="vpn"))
+    await repo.add(Domain.create("ann.example", route_policy="announce"))
     await repo.add(Domain.create("ex.example", route_policy="direct"))
     svc = DomainIndexService(repo, DomainIndex())
     await svc.rebuild()
-    assert svc.index.matches("vpn.example").route_policy == "vpn"
+    assert svc.index.matches("ann.example").route_policy == "announce"
     assert svc.index.matches("ex.example").route_policy == "direct"
 
 
 @pytest.mark.asyncio
 async def test_route_policy_migration_default(repo):
     domain = await repo.add(Domain.create("plain.example"))
-    assert domain.route_policy == "vpn"
+    assert domain.route_policy == "announce"
     prefix = await repo.add_static_prefix(StaticPrefix(cidr="9.9.9.9/32"))
-    assert prefix.route_policy == "vpn"
+    assert prefix.route_policy == "announce"
+
+
+@pytest.mark.asyncio
+async def test_legacy_vpn_alias_on_create(repo):
+    domain = await repo.add(Domain.create("legacy.example", route_policy="vpn"))  # type: ignore[arg-type]
+    assert domain.route_policy == "announce"
+    prefix = await repo.add_static_prefix(
+        StaticPrefix(cidr="9.9.9.8/32", route_policy="vpn")  # type: ignore[arg-type]
+    )
+    assert prefix.route_policy == "announce"
+
+
+@pytest.mark.asyncio
+async def test_add_domain_command_suppress_ipv6(repo):
+    handler = AddDomainHandler(repo)
+    result = await handler.handle(
+        AddDomainCommand(
+            name="v6.example",
+            route_policy="direct",
+            suppress_ipv6="off",
+        )
+    )
+    assert result.ok
+    assert result.data is not None
+    assert result.data.route_policy == "direct"
+    assert result.data.suppress_ipv6 == "off"
+    saved = await repo.get_by_id(result.data.id)  # type: ignore[arg-type]
+    assert saved is not None
+    assert saved.suppress_ipv6 == "off"
+    assert saved.route_policy == "direct"
+
+
+@pytest.mark.asyncio
+async def test_add_domain_command_rejects_bad_ipv6(repo):
+    handler = AddDomainHandler(repo)
+    result = await handler.handle(
+        AddDomainCommand(name="bad.example", suppress_ipv6="maybe")
+    )
+    assert not result.ok
+    assert "suppress_ipv6" in (result.error or "")

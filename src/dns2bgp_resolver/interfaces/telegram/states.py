@@ -3,6 +3,8 @@ from aiogram.fsm.state import State, StatesGroup
 
 class AddDomain(StatesGroup):
     waiting_name = State()
+    waiting_route = State()
+    waiting_ipv6 = State()
 
 
 class RemoveDomain(StatesGroup):
@@ -11,6 +13,7 @@ class RemoveDomain(StatesGroup):
 
 class AddPrefix(StatesGroup):
     waiting_cidr = State()
+    waiting_route = State()
 
 
 class RemovePrefix(StatesGroup):

@@ -13,7 +13,7 @@ DomainListType = Literal["url", "file"]
 MatchMode = Literal["exact", "suffix"]
 PrefixSource = Literal["static", "passive", "manual"]
 Ipv6SuppressMode = Literal["default", "on", "off"]
-RoutePolicy = Literal["vpn", "direct"]
+RoutePolicy = Literal["announce", "direct"]
 
 
 def resolve_ipv6_suppress(mode: Ipv6SuppressMode, *, global_default: bool) -> bool:
@@ -147,20 +147,21 @@ def _drop_covered(networks: list[IPv4Network]) -> list[IPv4Network]:
     return kept
 
 
-def _normalize_route_policy(raw: object) -> RoutePolicy:
-    text = str(raw or "vpn").strip().lower()
-    return "direct" if text == "direct" else "vpn"
+def normalize_route_policy(raw: object) -> RoutePolicy:
+    """Canonicalize route_policy; legacy alias 'vpn' maps to 'announce'."""
+    text = str(raw or "announce").strip().lower()
+    return "direct" if text == "direct" else "announce"
 
 
 def punch_exclude(
-    vpn_cidrs: Iterable[str], exclude_cidrs: Iterable[str]
+    announce_cidrs: Iterable[str], exclude_cidrs: Iterable[str]
 ) -> list[IPv4Network]:
     """Remove exclude networks from announced prefixes (hole-punch)."""
     excludes = [IPv4Network(c, strict=False) for c in exclude_cidrs]
     if not excludes:
-        return [IPv4Network(c, strict=False) for c in vpn_cidrs]
+        return [IPv4Network(c, strict=False) for c in announce_cidrs]
     result: list[IPv4Network] = []
-    for raw in vpn_cidrs:
+    for raw in announce_cidrs:
         parts = [IPv4Network(raw, strict=False)]
         for ex in excludes:
             next_parts: list[IPv4Network] = []
@@ -305,7 +306,7 @@ class Domain:
     enabled: bool = True
     match_mode: MatchMode = "exact"
     suppress_ipv6: Ipv6SuppressMode = "default"
-    route_policy: RoutePolicy = "vpn"
+    route_policy: RoutePolicy = "announce"
     created_at: datetime | None = None
     next_resolve_at: datetime | None = None
     last_resolved_at: datetime | None = None
@@ -320,12 +321,12 @@ class Domain:
         source: DomainSource = "manual",
         match_mode: MatchMode | None = None,
         suppress_ipv6: Ipv6SuppressMode = "default",
-        route_policy: RoutePolicy = "vpn",
+        route_policy: RoutePolicy = "announce",
     ) -> Self:
         parsed, mode = parse_domain_input(name)
-        policy: RoutePolicy = "vpn" if source == "auto" else route_policy
-        if policy not in ("vpn", "direct"):
-            policy = "vpn"
+        policy: RoutePolicy = (
+            "announce" if source == "auto" else normalize_route_policy(route_policy)
+        )
         return cls(
             name=parsed,
             source=source,
@@ -341,7 +342,7 @@ class StaticPrefix:
     id: int | None = None
     name: str | None = None
     enabled: bool = True
-    route_policy: RoutePolicy = "vpn"
+    route_policy: RoutePolicy = "announce"
     created_at: datetime | None = None
 
     def __post_init__(self) -> None:
@@ -349,7 +350,7 @@ class StaticPrefix:
         if net.version != 4:
             raise ValueError(f"IPv6 is not enabled: {self.cidr}")
         object.__setattr__(self, "cidr", str(net))
-        object.__setattr__(self, "route_policy", _normalize_route_policy(self.route_policy))
+        object.__setattr__(self, "route_policy", normalize_route_policy(self.route_policy))
 
 
 @dataclass(frozen=True, slots=True)

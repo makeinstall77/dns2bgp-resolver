@@ -12,7 +12,11 @@ from dns2bgp_resolver.application.commands import AddDomainCommand, AddPrefixCom
 from dns2bgp_resolver.application.services.list_parse import parse_import_lines
 from dns2bgp_resolver.container import AppContainer
 from dns2bgp_resolver.interfaces.telegram.auth import allowed
-from dns2bgp_resolver.interfaces.telegram.keyboards import confirm_import_menu, main_menu
+from dns2bgp_resolver.interfaces.telegram.keyboards import (
+    add_ipv6_options_menu,
+    add_route_options_menu,
+    main_menu,
+)
 from dns2bgp_resolver.interfaces.telegram.ui import BotUi
 
 router = Router()
@@ -22,10 +26,12 @@ _MAX_FILE_BYTES = 2 * 1024 * 1024
 _MAX_ITEMS = 5000
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass
 class _PendingImport:
     domains: list[str]
     prefixes: list[str]
+    route_policy: str = "announce"
+    suppress_ipv6: str = "default"
 
 
 _pending: dict[str, _PendingImport] = {}
@@ -40,6 +46,10 @@ def _store_pending(domains: list[str], prefixes: list[str]) -> str:
     return token
 
 
+def _get_pending(token: str) -> _PendingImport | None:
+    return _pending.get(token)
+
+
 def _pop_pending(token: str) -> _PendingImport | None:
     return _pending.pop(token, None)
 
@@ -52,6 +62,80 @@ def _looks_like_binary(raw: bytes) -> bool:
         return True
     control = sum(1 for b in sample if b < 9 or (13 < b < 32) or b == 127)
     return (control / len(sample)) > 0.05
+
+
+def _parse_mi_token_choice(data: str, kind: str) -> tuple[str, str] | None:
+    """Parse mi:{kind}:{token}:{choice} → (token, choice)."""
+    prefix = f"mi:{kind}:"
+    if not data.startswith(prefix):
+        return None
+    rest = data[len(prefix) :]
+    if ":" not in rest:
+        return None
+    token, choice = rest.rsplit(":", 1)
+    if not token:
+        return None
+    return token, choice
+
+
+async def _run_import(
+    *,
+    container: AppContainer,
+    pending: _PendingImport,
+    callback: CallbackQuery,
+    ui: BotUi,
+) -> None:
+    total = len(pending.domains) + len(pending.prefixes)
+    if callback.message:
+        await ui.edit(callback.message, f"⏳ Импорт {total} запис(ей)…")
+
+    d_added = d_exists = d_errors = 0
+    for name in pending.domains:
+        result = await container.bus.execute(
+            AddDomainCommand(
+                name=name,
+                route_policy=pending.route_policy,
+                suppress_ipv6=pending.suppress_ipv6,
+            )
+        )
+        if result.ok:
+            d_added += 1
+        elif result.error and "already exists" in result.error.lower():
+            d_exists += 1
+        else:
+            d_errors += 1
+            logger.warning("import domain failed for %s: %s", name, result.error)
+
+    p_added = p_exists = p_errors = 0
+    for cidr in pending.prefixes:
+        result = await container.bus.execute(
+            AddPrefixCommand(cidr=cidr, route_policy=pending.route_policy)
+        )
+        if result.ok:
+            p_added += 1
+        elif result.error and "already exists" in result.error.lower():
+            p_exists += 1
+        else:
+            p_errors += 1
+            logger.warning("import prefix failed for %s: %s", cidr, result.error)
+
+    parts = ["✅ Импорт завершён."]
+    if pending.domains:
+        parts.append(
+            f"Домены — добавлено: {d_added}, уже были: {d_exists}, ошибки: {d_errors}"
+            f" [{pending.route_policy}, ipv6={pending.suppress_ipv6}]"
+        )
+    if pending.prefixes:
+        parts.append(
+            f"Префиксы — добавлено: {p_added}, уже были: {p_exists}, ошибки: {p_errors}"
+            f" [{pending.route_policy}]"
+        )
+    if callback.message:
+        await ui.edit(
+            callback.message,
+            "\n".join(parts) + "\n\nГотово.",
+            reply_markup=main_menu(),
+        )
 
 
 @router.message(StateFilter(None), F.document)
@@ -126,63 +210,92 @@ async def on_document(message: Message, container: AppContainer, ui: BotUi) -> N
         dest.append("ручной список (с резолвом)")
     if prefixes:
         dest.append("static prefixes → bird")
-    lines.append("\nИмпортировать в " + " и ".join(dest) + "?")
-    await ui.reply(message, "\n".join(lines), reply_markup=confirm_import_menu(token))
+    lines.append("\nИмпорт в " + " и ".join(dest) + ".")
+    lines.append(
+        "Режим анонсирования (announce = в bird-пуле, direct = исключение):"
+    )
+    await ui.reply(
+        message,
+        "\n".join(lines),
+        reply_markup=add_route_options_menu(f"mi:rt:{token}"),
+    )
 
 
-@router.callback_query(F.data.startswith("mi:ok:"))
-async def cb_import_ok(callback: CallbackQuery, container: AppContainer, ui: BotUi) -> None:
+@router.callback_query(F.data.startswith("mi:rt:"))
+async def cb_import_route(
+    callback: CallbackQuery, container: AppContainer, ui: BotUi
+) -> None:
     if not allowed(container, callback.from_user.id if callback.from_user else None):
         await callback.answer("Access denied.", show_alert=True)
         return
-    token = (callback.data or "").split(":", 2)[-1]
-    pending = _pop_pending(token)
-    if not pending:
+    parsed = _parse_mi_token_choice(callback.data or "", "rt")
+    if parsed is None:
+        await callback.answer("Invalid")
+        return
+    token, choice = parsed
+    pending = _get_pending(token)
+    if pending is None:
         await callback.answer("Импорт устарел. Пришлите файл снова.", show_alert=True)
         return
+    if choice == "cancel":
+        _pop_pending(token)
+        if callback.message:
+            await ui.edit(callback.message, "Импорт отменён.", reply_markup=main_menu())
+        await callback.answer("Отменено.")
+        return
+    if choice not in ("announce", "direct"):
+        await callback.answer("Invalid")
+        return
 
+    pending.route_policy = choice
     await callback.answer()
-    total = len(pending.domains) + len(pending.prefixes)
-    if callback.message:
-        await ui.edit(callback.message, f"⏳ Импорт {total} запис(ей)…")
 
-    d_added = d_exists = d_errors = 0
-    for name in pending.domains:
-        result = await container.bus.execute(AddDomainCommand(name=name))
-        if result.ok:
-            d_added += 1
-        elif result.error and "already exists" in result.error.lower():
-            d_exists += 1
-        else:
-            d_errors += 1
-            logger.warning("import domain failed for %s: %s", name, result.error)
-
-    p_added = p_exists = p_errors = 0
-    for cidr in pending.prefixes:
-        result = await container.bus.execute(AddPrefixCommand(cidr=cidr))
-        if result.ok:
-            p_added += 1
-        elif result.error and "already exists" in result.error.lower():
-            p_exists += 1
-        else:
-            p_errors += 1
-            logger.warning("import prefix failed for %s: %s", cidr, result.error)
-
-    parts = ["✅ Импорт завершён."]
     if pending.domains:
-        parts.append(
-            f"Домены — добавлено: {d_added}, уже были: {d_exists}, ошибки: {d_errors}"
-        )
-    if pending.prefixes:
-        parts.append(
-            f"Префиксы — добавлено: {p_added}, уже были: {p_exists}, ошибки: {p_errors}"
-        )
-    if callback.message:
-        await ui.edit(
-            callback.message,
-            "\n".join(parts) + "\n\nГотово.",
-            reply_markup=main_menu(),
-        )
+        if callback.message:
+            await ui.edit(
+                callback.message,
+                f"Route: {choice}. IPv6 / AAAA для доменов из файла:",
+                reply_markup=add_ipv6_options_menu(f"mi:v6:{token}"),
+            )
+        return
+
+    # Prefixes only — commit now.
+    pending = _pop_pending(token)
+    if pending is None:
+        await callback.answer("Импорт устарел.", show_alert=True)
+        return
+    await _run_import(container=container, pending=pending, callback=callback, ui=ui)
+
+
+@router.callback_query(F.data.startswith("mi:v6:"))
+async def cb_import_ipv6(
+    callback: CallbackQuery, container: AppContainer, ui: BotUi
+) -> None:
+    if not allowed(container, callback.from_user.id if callback.from_user else None):
+        await callback.answer("Access denied.", show_alert=True)
+        return
+    parsed = _parse_mi_token_choice(callback.data or "", "v6")
+    if parsed is None:
+        await callback.answer("Invalid")
+        return
+    token, choice = parsed
+    if choice == "cancel":
+        _pop_pending(token)
+        if callback.message:
+            await ui.edit(callback.message, "Импорт отменён.", reply_markup=main_menu())
+        await callback.answer("Отменено.")
+        return
+    if choice not in ("default", "on", "off"):
+        await callback.answer("Invalid")
+        return
+
+    pending = _pop_pending(token)
+    if pending is None:
+        await callback.answer("Импорт устарел. Пришлите файл снова.", show_alert=True)
+        return
+    pending.suppress_ipv6 = choice
+    await callback.answer()
+    await _run_import(container=container, pending=pending, callback=callback, ui=ui)
 
 
 @router.callback_query(F.data.startswith("mi:no:"))

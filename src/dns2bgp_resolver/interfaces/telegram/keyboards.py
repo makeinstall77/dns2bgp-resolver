@@ -206,7 +206,7 @@ def manual_host_menu(
     *,
     is_mask: bool = False,
     suppress_ipv6: str = "default",
-    route_policy: str = "vpn",
+    route_policy: str = "announce",
 ) -> InlineKeyboardMarkup:
     actions: list[InlineKeyboardButton] = []
     if not is_mask:
@@ -226,7 +226,7 @@ def manual_host_menu(
         v6_label = "✅ AAAA вкл"
     else:
         v6_label = "⚙️ AAAA дефолт"
-    route_label = "🔀 direct" if route_policy == "direct" else "🛡 vpn"
+    route_label = "🔀 direct" if route_policy == "direct" else "🛡 announce"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             actions,
@@ -272,13 +272,41 @@ def confirm_remove_host_menu(domain_id: int, page: int) -> InlineKeyboardMarkup:
     )
 
 
-def confirm_import_menu(token: str) -> InlineKeyboardMarkup:
+def add_route_options_menu(callback_prefix: str) -> InlineKeyboardMarkup:
+    """callback_prefix examples: dadd:rt, padd:rt, mi:rt:<token>."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Импортировать", callback_data=f"mi:ok:{token}"),
-                InlineKeyboardButton(text="❌ Отмена", callback_data=f"mi:no:{token}"),
-            ]
+                InlineKeyboardButton(
+                    text="🛡 announce", callback_data=f"{callback_prefix}:announce"
+                ),
+                InlineKeyboardButton(
+                    text="🔀 direct", callback_data=f"{callback_prefix}:direct"
+                ),
+            ],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data=f"{callback_prefix}:cancel")],
+        ]
+    )
+
+
+def add_ipv6_options_menu(callback_prefix: str) -> InlineKeyboardMarkup:
+    """callback_prefix examples: dadd:v6, mi:v6:<token>."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="⚙️ AAAA дефолт", callback_data=f"{callback_prefix}:default"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✅ AAAA вкл", callback_data=f"{callback_prefix}:off"
+                ),
+                InlineKeyboardButton(
+                    text="🚫 AAAA выкл", callback_data=f"{callback_prefix}:on"
+                ),
+            ],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data=f"{callback_prefix}:cancel")],
         ]
     )
 

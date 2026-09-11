@@ -213,7 +213,7 @@ class ResolvePipeline:
     async def _write_export(self, *, allow_empty: bool = False) -> ExportSummary:
         from dns2bgp_resolver.application.commands.dto import ExportSummary
 
-        vpn: set[str] = set()
+        announce: set[str] = set()
         direct: set[str] = set()
 
         for ip, policy in await self._repository.all_active_ips_with_policy():
@@ -223,11 +223,11 @@ class ResolvePipeline:
             if policy == "direct":
                 direct.add(prefix)
             else:
-                vpn.add(prefix)
+                announce.add(prefix)
 
         for ip in await self._repository.list_passive_ips():
             if is_announcable_ipv4(ip):
-                vpn.add(ip_to_prefix32(ip))
+                announce.add(ip_to_prefix32(ip))
 
         for static in await self._repository.list_static_prefixes():
             if not static.enabled or not is_announcable_prefix(static.cidr):
@@ -235,9 +235,9 @@ class ResolvePipeline:
             if static.route_policy == "direct":
                 direct.add(static.cidr)
             else:
-                vpn.add(static.cidr)
+                announce.add(static.cidr)
 
-        ordered = summarize_prefixes(vpn, exclude=direct)
+        ordered = summarize_prefixes(announce, exclude=direct)
         written = await self._exporter.export(ordered, allow_empty=allow_empty)
         if not written:
             return ExportSummary(

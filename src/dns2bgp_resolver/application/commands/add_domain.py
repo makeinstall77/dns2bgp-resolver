@@ -5,13 +5,17 @@ from dataclasses import dataclass
 from dns2bgp_resolver.application.commands.dto import CommandResult, DomainView, domain_to_view
 from dns2bgp_resolver.application.errors import DomainAlreadyExistsError, ValidationError
 from dns2bgp_resolver.application.ports.repository import DomainRepository
-from dns2bgp_resolver.domain import Domain
+from dns2bgp_resolver.domain import Domain, normalize_route_policy
+
+
+_VALID_SUPPRESS: frozenset[str] = frozenset({"default", "on", "off"})
 
 
 @dataclass(frozen=True, slots=True)
 class AddDomainCommand:
     name: str
-    route_policy: str = "vpn"
+    route_policy: str = "announce"
+    suppress_ipv6: str = "default"
 
 
 class AddDomainHandler:
@@ -19,10 +23,16 @@ class AddDomainHandler:
         self._repository = repository
 
     async def handle(self, command: AddDomainCommand) -> CommandResult[DomainView]:
-        policy = "direct" if command.route_policy == "direct" else "vpn"
+        policy = normalize_route_policy(command.route_policy)
+        mode = (command.suppress_ipv6 or "default").strip().lower()
+        if mode not in _VALID_SUPPRESS:
+            return CommandResult.failure("suppress_ipv6 must be default|on|off")
         try:
             domain = Domain.create(
-                command.name, source="manual", suppress_ipv6="default", route_policy=policy
+                command.name,
+                source="manual",
+                suppress_ipv6=mode,  # type: ignore[arg-type]
+                route_policy=policy,
             )
         except ValueError as exc:
             return CommandResult.failure(str(exc))

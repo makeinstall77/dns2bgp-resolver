@@ -80,21 +80,33 @@ def main(
 def add_domain(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Domain or *.example.com suffix mask"),
-    route: str = typer.Option("vpn", "--route", help="vpn (default) or direct exception"),
+    route: str = typer.Option(
+        "announce",
+        "--route",
+        help="announce (bird pool, default; alias: vpn) or direct exception",
+    ),
+    ipv6: str = typer.Option(
+        "default",
+        "--ipv6",
+        help="AAAA mode: default | on (suppress) | off (allow)",
+    ),
 ) -> None:
     """Add a domain, resolve it, and update the bird include file."""
 
     async def _action(container: AppContainer):
-        policy = "direct" if route.strip().lower() == "direct" else "vpn"
         result = await container.bus.execute(
-            AddDomainCommand(name=name, route_policy=policy)
+            AddDomainCommand(name=name, route_policy=route, suppress_ipv6=ipv6)
         )
         if not result.ok:
             typer.secho(result.error or "error", fg=typer.colors.RED, err=True)
             raise typer.Exit(1)
         view = result.data
         ips = ", ".join(view.addresses) if view and view.addresses else "(none yet)"
-        typer.echo(f"{result.message}: {ips} [{view.route_policy if view else policy}]")
+        typer.echo(
+            f"{result.message}: {ips} "
+            f"[{view.route_policy if view else route}, "
+            f"ipv6={view.suppress_ipv6 if view else ipv6}]"
+        )
 
     _run(_with_container(ctx.obj["config"], _action))
 
@@ -104,12 +116,15 @@ def prefixes_add(
     ctx: typer.Context,
     cidr: str = typer.Argument(..., help="IPv4 address or CIDR (e.g. 149.154.160.0/20)"),
     name: str = typer.Option("", "--name", "-n", help="Optional label"),
-    route: str = typer.Option("vpn", "--route", help="vpn (default) or direct exception"),
+    route: str = typer.Option(
+        "announce",
+        "--route",
+        help="announce (bird pool, default; alias: vpn) or direct exception",
+    ),
 ) -> None:
     async def _action(container: AppContainer):
-        policy = "direct" if route.strip().lower() == "direct" else "vpn"
         result = await container.bus.execute(
-            AddPrefixCommand(cidr=cidr, name=name.strip() or None, route_policy=policy)
+            AddPrefixCommand(cidr=cidr, name=name.strip() or None, route_policy=route)
         )
         if not result.ok:
             typer.secho(result.error or "error", fg=typer.colors.RED, err=True)

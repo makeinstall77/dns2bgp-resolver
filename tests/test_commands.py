@@ -106,7 +106,7 @@ async def test_add_resolve_export(bus, bird_path: Path):
     assert set(result.data.addresses) == {"1.2.3.4", "1.2.3.5"}
     assert bird_path.is_file()
     text = bird_path.read_text(encoding="utf-8")
-    assert "route 1.2.3.0/24 reject;" in text
+    assert 'route 1.2.3.0/24 via "wg0";' in text
     assert "route 1.2.3.4/32" not in text
 
 
@@ -341,7 +341,7 @@ async def test_bird_exporter_ip_nexthop(tmp_path: Path):
         BirdSettings(include_path=str(path), nexthop="10.0.0.1", birdc_enable=False)
     )
     await exporter.export(["1.1.1.1/32"])
-    assert "route 1.1.1.1/32 reject;" in path.read_text(encoding="utf-8")
+    assert "route 1.1.1.1/32 via 10.0.0.1;" in path.read_text(encoding="utf-8")
     assert (path.stat().st_mode & 0o777) == 0o664
     assert (path.parent.stat().st_mode & 0o777) == 0o755
 
