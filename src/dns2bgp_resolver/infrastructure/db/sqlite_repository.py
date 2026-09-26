@@ -49,6 +49,11 @@ logger = logging.getLogger(__name__)
 _BATCH_SIZE = 500
 _SQLITE_BUSY_TIMEOUT_MS = 30_000
 
+# asyncpg/PG18 rejects integer 1 for boolean columns; SQLite accepted it.
+# Bind a real bool and CAST so both dialects store TRUE, not an int.
+_SQL_BOOL_TRUE = "CAST(:enabled AS BOOLEAN)"
+_SQL_BOOL_TRUE_PARAMS = {"enabled": True}
+
 
 def _ensure_aware(dt: datetime | None) -> datetime | None:
     if dt is None:
@@ -470,11 +475,12 @@ class SqlAlchemyDomainRepository(DomainRepository):
                     text(
                         "INSERT INTO domains (name, source, list_id, enabled, match_mode, "
                         "suppress_ipv6, route_policy) "
-                        "SELECT t.name, 'auto', :list_id, 1, 'suffix', 'default', 'announce' "
+                        f"SELECT t.name, 'auto', :list_id, {_SQL_BOOL_TRUE}, "
+                        "'suffix', 'default', 'announce' "
                         "FROM sync_target t "
                         "WHERE NOT EXISTS (SELECT 1 FROM domains d WHERE d.name = t.name)"
                     ),
-                    {"list_id": list_id},
+                    {"list_id": list_id, **_SQL_BOOL_TRUE_PARAMS},
                 )
                 added = add_result.rowcount if add_result.rowcount >= 0 else 0
 
@@ -526,10 +532,12 @@ class SqlAlchemyDomainRepository(DomainRepository):
                     text(
                         "INSERT INTO domains (name, source, enabled, match_mode, "
                         "suppress_ipv6, route_policy) "
-                        "SELECT t.name, 'auto', 1, 'suffix', 'default', 'announce' "
+                        f"SELECT t.name, 'auto', {_SQL_BOOL_TRUE}, "
+                        "'suffix', 'default', 'announce' "
                         "FROM sync_target t "
                         "WHERE NOT EXISTS (SELECT 1 FROM domains d WHERE d.name = t.name)"
-                    )
+                    ),
+                    {**_SQL_BOOL_TRUE_PARAMS},
                 )
                 added = add_result.rowcount if add_result.rowcount >= 0 else 0
 

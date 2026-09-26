@@ -37,6 +37,7 @@ from dns2bgp_resolver.config import AutoListSettings, BirdSettings, RefreshSetti
 from dns2bgp_resolver.domain import Domain
 from dns2bgp_resolver.infrastructure.bird.static_file_exporter import StaticFileBirdExporter
 from dns2bgp_resolver.infrastructure.db.sqlite_repository import SqlAlchemyDomainRepository
+from pg_support import assert_enabled_is_true
 
 
 class FixedClock(Clock):
@@ -201,6 +202,41 @@ async def test_sync_auto_domains_add_and_remove(repo):
 
     names = {d.name.value for d in (await repo.search_auto(""))[0]}
     assert names == {"b.com", "c.com"}
+    await assert_enabled_is_true(repo, "c.com")
+
+
+@pytest.mark.asyncio
+async def test_sync_list_domains_enabled_true_and_idempotent(repo):
+    list_id = await _add_url_list(repo)
+    names = {"auto-sync.example"}
+    first = await repo.sync_list_domains(list_id, names)
+    assert first.added == 1
+    await assert_enabled_is_true(repo, "auto-sync.example")
+    second = await repo.sync_list_domains(list_id, names)
+    assert second.added == 0
+    assert second.removed == 0
+    await assert_enabled_is_true(repo, "auto-sync.example")
+
+
+@pytest.mark.asyncio
+async def test_sync_auto_domains_legacy_enabled_true_and_idempotent(repo):
+    first = await repo.sync_auto_domains({"legacy-auto.example"})
+    assert first.added == 1
+    await assert_enabled_is_true(repo, "legacy-auto.example")
+    second = await repo.sync_auto_domains({"legacy-auto.example"})
+    assert second.added == 0
+    assert second.removed == 0
+    await assert_enabled_is_true(repo, "legacy-auto.example")
+
+
+def test_raw_auto_insert_sql_does_not_use_integer_for_enabled():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src/dns2bgp_resolver/infrastructure/db/sqlite_repository.py"
+    ).read_text(encoding="utf-8")
+    assert "SELECT t.name, 'auto', :list_id, 1," not in source
+    assert "SELECT t.name, 'auto', 1, 'suffix'" not in source
+    assert "CAST(:enabled AS BOOLEAN)" in source
 
 
 @pytest.mark.asyncio
