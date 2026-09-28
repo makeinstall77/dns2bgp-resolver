@@ -218,6 +218,8 @@ ipv6:
 
 Put the dnsdist console key in `/etc/dns2bgp/dnsdist.key` (readable by `dns2bgp`). On package install: helper script + `dns2bgp.service` `ExecStartPost` + `dnsdist.service.d` `ExecReload` so list changes and systemd restarts refresh the in-memory SuffixMatchNode. The package also installs `/etc/sudoers.d/dns2bgp` so `dns2bgp` can run `flush-unbound-zone.sh` (unbound `flush_zone`) after suppress is enabled — stale AAAA leave the recursive cache without waiting for TTL.
 
+`reload-dnsdist.sh` authenticates via a temporary client config (`setKey` + `controlSocket`). On dnsdist 2.0.x the client `-k` flag does not authenticate `-e` sessions (and still exits 0), so list writes would look successful while the in-memory SuffixMatchNode stayed stale.
+
 - **`off`** — no IPv6 policy (default).
 - **`suppress`** — after each DomainIndex rebuild, write the domain list and best-effort reload dnsdist. Put dnsdist in front of unbound; AAAA (and preferably HTTPS/SVCB) for matched names → NODATA. Example: [deploy/dnsdist.example.conf](deploy/dnsdist.example.conf).
 - **`announce`** — stub for later: collect AAAA and export Bird IPv6 when IPv6 export is enabled. Same DomainIndex; no dnsdist suppress.

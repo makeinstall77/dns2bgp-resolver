@@ -218,6 +218,8 @@ ipv6:
 
 Ключ консоли dnsdist положите в `/etc/dns2bgp/dnsdist.key` (читаемый для `dns2bgp`). При установке пакета: helper-скрипт + `ExecStartPost` в `dns2bgp.service` + `ExecReload` в `dnsdist.service.d`, чтобы изменения списка и systemd-рестарты обновляли in-memory SuffixMatchNode. Пакет также ставит `/etc/sudoers.d/dns2bgp`, чтобы `dns2bgp` мог вызывать `flush-unbound-zone.sh` (`unbound-control flush_zone`) после включения suppress — устаревшие AAAA уходят из кэша unbound без ожидания TTL.
 
+`reload-dnsdist.sh` ходит в консоль через временный client-конфиг (`setKey` + `controlSocket`). На dnsdist 2.0.x клиентский `-k` не аутентифицирует `-e` (и всё равно выходит с кодом 0), поэтому запись списка выглядела успешной, а in-memory SuffixMatchNode оставался старым.
+
 - **`off`** — без политики IPv6 (по умолчанию).
 - **`suppress`** — после каждой пересборки DomainIndex пишет список доменов и best-effort reload dnsdist. dnsdist перед unbound; AAAA (и желательно HTTPS/SVCB) для совпавших имён → NODATA. Пример: [deploy/dnsdist.example.conf](deploy/dnsdist.example.conf).
 - **`announce`** — заготовка на потом: собирать AAAA и экспортировать Bird IPv6, когда включён IPv6-export. Тот же DomainIndex; без suppress в dnsdist.
