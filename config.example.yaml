@@ -62,3 +62,10 @@ ipv6:
   dnsdist_console_key_file: "/etc/dns2bgp/dnsdist.key"
   dnsdist_reload_cmd:
     - /usr/lib/dns2bgp/reload-dnsdist.sh
+  # Flush unbound when a domain newly enters the suppress list (skips startup).
+  cache_flush_enable: false
+  cache_flush_cmd:
+    - sudo
+    - -n
+    - /usr/lib/dns2bgp/flush-unbound-zone.sh
+    - "@DOMAIN@"

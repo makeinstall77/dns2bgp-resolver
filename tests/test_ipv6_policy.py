@@ -239,3 +239,58 @@ async def test_reload_failure_does_not_raise(tmp_path: Path):
     exporter = DnsdistDomainListExporter(settings)
     await exporter.export({"example.com"})
     assert path.exists()
+
+
+@pytest.mark.asyncio
+async def test_cache_flush_on_newly_suppressed(tmp_path: Path):
+    path = tmp_path / "aaaa-suppress.domains"
+    flush_log = tmp_path / "flushed.txt"
+    launcher = tmp_path / "launch.sh"
+    launcher.write_text(
+        f"#!/bin/sh\necho \"$1\" >>\"{flush_log}\"\n",
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
+    settings = Ipv6Settings(
+        mode="suppress",
+        dnsdist_list_path=str(path),
+        dnsdist_reload_enable=False,
+        cache_flush_enable=True,
+        cache_flush_cmd=[str(launcher), "@DOMAIN@"],
+    )
+    policy = ModeBasedIpv6Policy(settings)
+    idx = DomainIndex()
+    idx.rebuild(rules=[("one.test", "exact")])
+    await policy.apply(idx, suppress_names=["one.test"])
+    assert not flush_log.exists()  # first export = startup, skip flush
+
+    idx.rebuild(rules=[("one.test", "exact"), ("two.test", "exact")])
+    await policy.apply(idx, suppress_names=["one.test", "two.test"])
+    assert flush_log.read_text(encoding="utf-8").strip() == "two.test"
+
+    await policy.apply(idx, suppress_names=["one.test", "two.test"])
+    assert flush_log.read_text(encoding="utf-8").strip() == "two.test"
+
+
+@pytest.mark.asyncio
+async def test_cache_flush_disabled(tmp_path: Path):
+    path = tmp_path / "aaaa-suppress.domains"
+    flush_log = tmp_path / "flushed.txt"
+    launcher = tmp_path / "launch.sh"
+    launcher.write_text(
+        f"#!/bin/sh\necho \"$1\" >>{flush_log}\n",
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
+    settings = Ipv6Settings(
+        mode="suppress",
+        dnsdist_list_path=str(path),
+        dnsdist_reload_enable=False,
+        cache_flush_enable=False,
+        cache_flush_cmd=[str(launcher), "@DOMAIN@"],
+    )
+    policy = ModeBasedIpv6Policy(settings)
+    idx = DomainIndex()
+    await policy.apply(idx, suppress_names=["one.test"])
+    await policy.apply(idx, suppress_names=["one.test", "two.test"])
+    assert not flush_log.exists()

@@ -12,6 +12,15 @@ case "$1" in
         install -d -o dns2bgp -g dns2bgp -m 0750 /var/lib/dns2bgp
         chown -R dns2bgp:dns2bgp /var/lib/dns2bgp
         chown -R root:root /opt/dns2bgp
+        if [ -f /etc/sudoers.d/dns2bgp ]; then
+            chmod 0440 /etc/sudoers.d/dns2bgp
+            if command -v visudo >/dev/null 2>&1; then
+                visudo -cf /etc/sudoers.d/dns2bgp >/dev/null || {
+                    echo "dns2bgp: invalid sudoers file, removing" >&2
+                    rm -f /etc/sudoers.d/dns2bgp
+                }
+            fi
+        fi
         systemctl daemon-reload
         systemctl enable dns2bgp.service
         systemctl restart dns2bgp.service || systemctl start dns2bgp.service

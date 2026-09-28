@@ -207,9 +207,16 @@ ipv6:
   dnsdist_console_key_file: "/etc/dns2bgp/dnsdist.key"
   dnsdist_reload_cmd:
     - /usr/lib/dns2bgp/reload-dnsdist.sh
+  # Flush unbound when a domain newly enters the suppress list (not on startup).
+  cache_flush_enable: true
+  cache_flush_cmd:
+    - sudo
+    - -n
+    - /usr/lib/dns2bgp/flush-unbound-zone.sh
+    - "@DOMAIN@"
 ```
 
-Put the dnsdist console key in `/etc/dns2bgp/dnsdist.key` (readable by `dns2bgp`). On package install: helper script + `dns2bgp.service` `ExecStartPost` + `dnsdist.service.d` `ExecReload` so list changes and systemd restarts refresh the in-memory SuffixMatchNode.
+Put the dnsdist console key in `/etc/dns2bgp/dnsdist.key` (readable by `dns2bgp`). On package install: helper script + `dns2bgp.service` `ExecStartPost` + `dnsdist.service.d` `ExecReload` so list changes and systemd restarts refresh the in-memory SuffixMatchNode. The package also installs `/etc/sudoers.d/dns2bgp` so `dns2bgp` can run `flush-unbound-zone.sh` (unbound `flush_zone`) after suppress is enabled — stale AAAA leave the recursive cache without waiting for TTL.
 
 - **`off`** — no IPv6 policy (default).
 - **`suppress`** — after each DomainIndex rebuild, write the domain list and best-effort reload dnsdist. Put dnsdist in front of unbound; AAAA (and preferably HTTPS/SVCB) for matched names → NODATA. Example: [deploy/dnsdist.example.conf](deploy/dnsdist.example.conf).

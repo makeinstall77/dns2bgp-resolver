@@ -207,9 +207,16 @@ ipv6:
   dnsdist_console_key_file: "/etc/dns2bgp/dnsdist.key"
   dnsdist_reload_cmd:
     - /usr/lib/dns2bgp/reload-dnsdist.sh
+  # Сброс unbound, когда домен впервые попадает в suppress-список (не при старте).
+  cache_flush_enable: true
+  cache_flush_cmd:
+    - sudo
+    - -n
+    - /usr/lib/dns2bgp/flush-unbound-zone.sh
+    - "@DOMAIN@"
 ```
 
-Ключ консоли dnsdist положите в `/etc/dns2bgp/dnsdist.key` (читаемый для `dns2bgp`). При установке пакета: helper-скрипт + `ExecStartPost` в `dns2bgp.service` + `ExecReload` в `dnsdist.service.d`, чтобы изменения списка и systemd-рестарты обновляли in-memory SuffixMatchNode.
+Ключ консоли dnsdist положите в `/etc/dns2bgp/dnsdist.key` (читаемый для `dns2bgp`). При установке пакета: helper-скрипт + `ExecStartPost` в `dns2bgp.service` + `ExecReload` в `dnsdist.service.d`, чтобы изменения списка и systemd-рестарты обновляли in-memory SuffixMatchNode. Пакет также ставит `/etc/sudoers.d/dns2bgp`, чтобы `dns2bgp` мог вызывать `flush-unbound-zone.sh` (`unbound-control flush_zone`) после включения suppress — устаревшие AAAA уходят из кэша unbound без ожидания TTL.
 
 - **`off`** — без политики IPv6 (по умолчанию).
 - **`suppress`** — после каждой пересборки DomainIndex пишет список доменов и best-effort reload dnsdist. dnsdist перед unbound; AAAA (и желательно HTTPS/SVCB) для совпавших имён → NODATA. Пример: [deploy/dnsdist.example.conf](deploy/dnsdist.example.conf).

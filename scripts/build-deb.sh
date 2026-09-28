@@ -73,6 +73,7 @@ echo "==> Preparing staging (${STAGING})"
 mkdir -p \
     "${STAGING}/opt/dns2bgp" \
     "${STAGING}/etc/dns2bgp" \
+    "${STAGING}/etc/sudoers.d" \
     "${STAGING}/usr/lib/dns2bgp" \
     "${STAGING}/lib/systemd/system" \
     "${STAGING}/lib/systemd/system/dnsdist.service.d" \
@@ -87,6 +88,8 @@ sed -i '1s|.*|#!/opt/dns2bgp/.venv/bin/python3|' "${STAGING}/opt/dns2bgp/.venv/b
 install -m 0644 "${ROOT}/deploy/config.yaml" "${STAGING}/etc/dns2bgp/config.yaml"
 install -m 0644 "${ROOT}/deploy/dns2bgp.service" "${STAGING}/lib/systemd/system/dns2bgp.service"
 install -m 0755 "${ROOT}/deploy/reload-dnsdist.sh" "${STAGING}/usr/lib/dns2bgp/reload-dnsdist.sh"
+install -m 0755 "${ROOT}/deploy/flush-unbound-zone.sh" "${STAGING}/usr/lib/dns2bgp/flush-unbound-zone.sh"
+install -m 0440 "${ROOT}/deploy/dns2bgp-sudoers" "${STAGING}/etc/sudoers.d/dns2bgp"
 install -m 0644 "${ROOT}/deploy/dnsdist-reload.conf" \
     "${STAGING}/lib/systemd/system/dnsdist.service.d/dns2bgp-reload.conf"
 install -m 0644 "${ROOT}/deploy/dnsdist.example.conf" \
@@ -103,8 +106,8 @@ Version: ${VERSION}
 Section: net
 Priority: optional
 Architecture: ${ARCH}
-Depends: python3 (>= 3.12), adduser
-Recommends: bird
+Depends: python3 (>= 3.12), adduser, sudo
+Recommends: bird, unbound
 Maintainer: dns2bgp-resolver <local>
 Description: Resolve domains into BGP routes for VPN traffic steering
  DNS resolver that publishes domain IP addresses as bird static routes.

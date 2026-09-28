@@ -1,0 +1,2 @@
+# Allow dns2bgp to flush unbound zones after AAAA suppress is enabled.
+dns2bgp ALL=(root) NOPASSWD: /usr/lib/dns2bgp/flush-unbound-zone.sh *

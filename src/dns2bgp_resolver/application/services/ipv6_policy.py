@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from dns2bgp_resolver.application.ports.ipv6_policy import Ipv6Policy
 from dns2bgp_resolver.config import Ipv6Settings
 from dns2bgp_resolver.domain.domain_index import DomainIndex
+from dns2bgp_resolver.infrastructure.dns.unbound_cache_flusher import UnboundCacheFlusher
 from dns2bgp_resolver.infrastructure.dnsdist.domain_list_exporter import DnsdistDomainListExporter
 
 logger = logging.getLogger(__name__)
@@ -22,9 +23,13 @@ class ModeBasedIpv6Policy(Ipv6Policy):
         self,
         settings: Ipv6Settings,
         exporter: DnsdistDomainListExporter | None = None,
+        cache_flusher: UnboundCacheFlusher | None = None,
     ) -> None:
         self._settings = settings
         self._exporter = exporter or DnsdistDomainListExporter(settings)
+        self._cache_flusher = cache_flusher or UnboundCacheFlusher(settings)
+        self._last_suppress: frozenset[str] = frozenset()
+        self._seen_export = False
 
     async def apply(
         self,
@@ -37,12 +42,22 @@ class ModeBasedIpv6Policy(Ipv6Policy):
             if mode == "off":
                 return
             if mode == "suppress":
-                names = (
-                    frozenset(suppress_names)
-                    if suppress_names is not None
-                    else index.names_snapshot()
+                names = frozenset(
+                    n.strip(".").lower()
+                    for n in (
+                        suppress_names
+                        if suppress_names is not None
+                        else index.names_snapshot()
+                    )
+                    if n and n.strip(".")
                 )
                 await self._exporter.export(names)
+                if self._seen_export:
+                    added = names - self._last_suppress
+                    if added:
+                        await self._cache_flusher.flush_zones(sorted(added))
+                self._last_suppress = names
+                self._seen_export = True
                 return
             if mode == "announce":
                 logger.info(

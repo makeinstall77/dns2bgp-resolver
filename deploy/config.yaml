@@ -47,3 +47,9 @@ ipv6:
   dnsdist_console_key_file: "/etc/dns2bgp/dnsdist.key"
   dnsdist_reload_cmd:
     - /usr/lib/dns2bgp/reload-dnsdist.sh
+  cache_flush_enable: true
+  cache_flush_cmd:
+    - sudo
+    - -n
+    - /usr/lib/dns2bgp/flush-unbound-zone.sh
+    - "@DOMAIN@"

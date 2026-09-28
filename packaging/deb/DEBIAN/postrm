@@ -9,6 +9,7 @@ esac
 
 if [ "$1" = "purge" ]; then
     rm -rf /etc/dns2bgp
+    rm -f /etc/sudoers.d/dns2bgp
 fi
 
 exit 0

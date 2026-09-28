@@ -83,6 +83,19 @@ class Ipv6Settings(BaseModel):
             "/usr/lib/dns2bgp/reload-dnsdist.sh",
         ]
     )
+    # After a name is newly added to the suppress list, flush it from unbound
+    # so stale AAAA/HTTPS/SVCB leave the recursive cache immediately.
+    # @DOMAIN@ is replaced with the zone name. Requires sudoers for dns2bgp
+    # (see deploy/dns2bgp-sudoers) when using the packaged helper.
+    cache_flush_enable: bool = False
+    cache_flush_cmd: list[str] = Field(
+        default_factory=lambda: [
+            "sudo",
+            "-n",
+            "/usr/lib/dns2bgp/flush-unbound-zone.sh",
+            "@DOMAIN@",
+        ]
+    )
 
 
 class Settings(BaseSettings):
