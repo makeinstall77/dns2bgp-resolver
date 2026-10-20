@@ -133,3 +133,45 @@ def test_summarize_prefixes():
         "1.2.3.0/24",
         "8.8.8.8/32",
     ]
+
+
+def test_drop_covered_matches_pairwise_and_stays_fast():
+    import random
+    import time
+    from ipaddress import IPv4Network
+
+    from dns2bgp_resolver.domain import _drop_covered
+
+    def brute(nets: list[IPv4Network]) -> set[IPv4Network]:
+        uniq = list(set(nets))
+        return {n for n in uniq if not any(n != o and n.subnet_of(o) for o in uniq)}
+
+    rng = random.Random(0)
+    samples: list[list[IPv4Network]] = [
+        [],
+        [IPv4Network("10.0.0.1/32")],
+        [IPv4Network("10.0.0.0/8"), IPv4Network("10.1.2.3/32"), IPv4Network("11.0.0.0/8")],
+        [IPv4Network("1.2.3.0/24"), IPv4Network("1.2.3.0/24")],
+        [IPv4Network("1.2.2.0/24"), IPv4Network("1.2.3.0/24")],
+    ]
+    mixed: list[IPv4Network] = []
+    for _ in range(40):
+        addr = rng.randrange(1 << 32)
+        length = rng.choice((8, 16, 20, 24, 28, 32))
+        base = addr & (0xFFFFFFFF << (32 - length))
+        mixed.append(IPv4Network((base, length)))
+        mixed.append(IPv4Network((base, 32)))
+    samples.append(mixed)
+
+    for nets in samples:
+        assert set(_drop_covered(nets)) == brute(nets)
+
+    hosts = [
+        IPv4Network(f"1.{(i >> 16) & 255}.{(i >> 8) & 255}.{i & 255}/32")
+        for i in range(8000)
+    ]
+    started = time.perf_counter()
+    kept = _drop_covered(hosts)
+    elapsed = time.perf_counter() - started
+    assert len(kept) == 8000
+    assert elapsed < 0.5

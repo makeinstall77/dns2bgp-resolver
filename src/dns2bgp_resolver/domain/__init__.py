@@ -138,12 +138,26 @@ def ip_to_prefix32(ip: str) -> str:
 
 
 def _drop_covered(networks: list[IPv4Network]) -> list[IPv4Network]:
-    """Keep broader prefixes; drop those fully contained in another."""
+    """Keep broader prefixes; drop those fully contained in another.
+
+    CIDR blocks never partially overlap, so after sorting by start address
+    a prefix is covered iff some earlier prefix's end reaches at least as far.
+    That is one sort plus a linear sweep, not a pairwise subnet check.
+    """
+    if len(networks) < 2:
+        return list(networks)
+    ordered = sorted(
+        set(networks),
+        key=lambda n: (int(n.network_address), -int(n.broadcast_address)),
+    )
     kept: list[IPv4Network] = []
-    for net in sorted(set(networks), key=lambda n: (n.prefixlen, int(n.network_address))):
-        if any(net != other and net.subnet_of(other) for other in kept):
+    max_end = -1
+    for net in ordered:
+        end = int(net.broadcast_address)
+        if end <= max_end:
             continue
         kept.append(net)
+        max_end = end
     return kept
 
 
