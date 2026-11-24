@@ -28,6 +28,9 @@ async def run_services(
         await container.auto_sync_scheduler.start()
     if container.dnstap_server is not None:
         await container.dnstap_server.start()
+    purged = await container.repository.purge_orphan_passive_hits()
+    if purged:
+        logger.info("purged %d orphan passive hit(s)", purged)
     await container.pipeline.export_routes()
 
     tasks: list[asyncio.Task] = []

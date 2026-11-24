@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dns2bgp-resolver"
-version = "0.3.2"
+version = "0.3.3"
 description = "Resolve domains into a BGP route pool for policy-based routing"
 readme = "README.md"
 license = "MIT"

@@ -225,9 +225,14 @@ class ResolvePipeline:
             else:
                 announce.add(prefix)
 
-        for ip in await self._repository.list_passive_ips():
-            if is_announcable_ipv4(ip):
-                announce.add(ip_to_prefix32(ip))
+        for ip, policy in await self._repository.list_passive_ips_with_policy():
+            if not is_announcable_ipv4(ip):
+                continue
+            prefix = ip_to_prefix32(ip)
+            if policy == "direct":
+                direct.add(prefix)
+            else:
+                announce.add(prefix)
 
         for static in await self._repository.list_static_prefixes():
             if not static.enabled or not is_announcable_prefix(static.cidr):
@@ -273,6 +278,7 @@ class ResolvePipeline:
         intentionally empty the bird include file.
         """
         return await self.export_routes(allow_empty=allow_empty)
+
     async def flush_pending_export(self) -> None:
         """Flush deferred export if any (e.g. on shutdown)."""
         if self._flush_task is not None and not self._flush_task.done():

@@ -368,6 +368,11 @@ class SqlAlchemyDomainRepository(DomainRepository):
             row = result.scalar_one_or_none()
             if row is None:
                 return False
+            # Passive hits key off the rule name; drop them with the domain so
+            # orphaned CDN edges cannot keep /24 aggregates in bird forever.
+            await session.execute(
+                delete(PassiveHitRow).where(PassiveHitRow.matched_name == str(name))
+            )
             await session.delete(row)
             await session.commit()
             return True
@@ -873,15 +878,16 @@ class SqlAlchemyDomainRepository(DomainRepository):
             logger.debug("skipping list_due while auto sync is in progress")
             return []
         async with self._session_factory() as session:
+            # Manual exact + suffix: resolve the stored apex (youtube.com for
+            # *.youtube.com). Auto domains stay dnstap-only.
             result = await session.execute(
                 select(DomainRow)
                 .where(DomainRow.enabled.is_(True))
                 .where(DomainRow.source == "manual")
-                .where(DomainRow.match_mode != "suffix")
                 .where(
                     (DomainRow.next_resolve_at.is_(None)) | (DomainRow.next_resolve_at <= now)
                 )
-                .order_by(DomainRow.name)
+                .order_by(DomainRow.next_resolve_at.asc().nullsfirst(), DomainRow.name)
             )
             rows = result.scalars().all()
             return [_row_to_domain(r) for r in rows]
@@ -1035,7 +1041,6 @@ class SqlAlchemyDomainRepository(DomainRepository):
                 .join(DomainRow)
                 .where(DomainRow.enabled.is_(True))
                 .where(DomainRow.source == "manual")
-                .where(DomainRow.match_mode != "suffix")
                 .where(AddressRow.family == 4)
             )
             return list(result.scalars().all())
@@ -1047,7 +1052,6 @@ class SqlAlchemyDomainRepository(DomainRepository):
                 .join(DomainRow)
                 .where(DomainRow.enabled.is_(True))
                 .where(DomainRow.source == "manual")
-                .where(DomainRow.match_mode != "suffix")
                 .where(AddressRow.family == 4)
             )
             return [
@@ -1119,6 +1123,33 @@ class SqlAlchemyDomainRepository(DomainRepository):
         async with self._session_factory() as session:
             result = await session.execute(select(PassiveHitRow.ip))
             return list(result.scalars().all())
+
+    async def list_passive_ips_with_policy(self) -> list[tuple[str, str]]:
+        """Passive IPs still tied to an enabled domain, with that domain's policy.
+
+        Orphan hits (domain removed) are omitted so they cannot keep CDN /24s
+        in the bird pool after remove.
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(PassiveHitRow.ip, DomainRow.route_policy)
+                .join(DomainRow, DomainRow.name == PassiveHitRow.matched_name)
+                .where(DomainRow.enabled.is_(True))
+            )
+            return [
+                (ip, _normalize_route_policy(policy)) for ip, policy in result.all()
+            ]
+
+    async def purge_orphan_passive_hits(self) -> int:
+        """Delete passive hits whose matched_name no longer exists as a domain."""
+        async with self._session_factory() as session:
+            result = await session.execute(
+                delete(PassiveHitRow).where(
+                    ~PassiveHitRow.matched_name.in_(select(DomainRow.name))
+                )
+            )
+            await session.commit()
+            return int(result.rowcount or 0)
 
     async def list_passive_hits(self, *, limit: int = 100) -> list[PassiveHit]:
         async with self._session_factory() as session:

@@ -75,7 +75,7 @@ class SettingsUpdateBody(BaseModel):
 
 
 def create_app(container: AppContainer) -> FastAPI:
-    app = FastAPI(title="dns2bgp-resolver", version="0.3.2")
+    app = FastAPI(title="dns2bgp-resolver", version="0.3.3")
     app.state.container = container
 
     def require_api_key(

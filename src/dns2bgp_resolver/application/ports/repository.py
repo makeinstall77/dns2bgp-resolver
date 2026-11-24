@@ -89,7 +89,7 @@ class DomainRepository(ABC):
 
     @abstractmethod
     async def remove(self, name: DomainName) -> bool:
-        """Delete domain and its addresses. Return False if missing."""
+        """Delete domain, its addresses, and passive hits for that rule name."""
 
     @abstractmethod
     async def get(self, name: DomainName) -> Domain | None:
@@ -299,7 +299,15 @@ class DomainRepository(ABC):
 
     @abstractmethod
     async def list_passive_ips(self) -> list[str]:
-        ...
+        """All stored passive IPs (including orphans)."""
+
+    @abstractmethod
+    async def list_passive_ips_with_policy(self) -> list[tuple[str, str]]:
+        """Passive IPs joined to an enabled domain: (ip, route_policy)."""
+
+    @abstractmethod
+    async def purge_orphan_passive_hits(self) -> int:
+        """Delete passive hits with no matching domain row. Return deleted count."""
 
     @abstractmethod
     async def list_passive_hits(self, *, limit: int = 100) -> list[PassiveHit]:

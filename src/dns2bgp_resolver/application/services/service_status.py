@@ -156,6 +156,7 @@ async def collect_service_status(
     _, auto_total = await repository.search_auto("", offset=0, limit=1)
     static = await repository.list_static_prefixes()
     passive_ips = await repository.list_passive_ips()
+    passive_with_policy = await repository.list_passive_ips_with_policy()
     lists = await repository.list_domain_lists()
     due = await repository.list_due(clock_now)
     keywords = await repository.list_exclude_keywords()
@@ -168,10 +169,11 @@ async def collect_service_status(
             manual_ann += 1
             prefixes.add(ip_to_prefix32(ip))
     passive_ann = 0
-    for ip in passive_ips:
-        if is_announcable_ipv4(ip):
-            passive_ann += 1
-            prefixes.add(ip_to_prefix32(ip))
+    for ip, policy in passive_with_policy:
+        if policy == "direct" or not is_announcable_ipv4(ip):
+            continue
+        passive_ann += 1
+        prefixes.add(ip_to_prefix32(ip))
     static_enabled = 0
     for item in static:
         if item.enabled and is_announcable_prefix(item.cidr):

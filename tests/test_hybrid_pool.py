@@ -89,6 +89,77 @@ async def test_list_due_skips_auto(repo):
 
 
 @pytest.mark.asyncio
+async def test_list_due_includes_manual_suffix(repo):
+    await repo.add(Domain.create("*.suffix.com", source="manual"))
+    due = await repo.list_due(datetime(2026, 1, 1, tzinfo=timezone.utc))
+    names = {str(d.name) for d in due}
+    assert "suffix.com" in names
+
+
+@pytest.mark.asyncio
+async def test_remove_deletes_passive_hits(repo):
+    await repo.add(Domain.create("gone.com", source="manual"))
+    await repo.upsert_passive_hit(
+        "9.9.9.9", "gone.com", seen_at=datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    assert "9.9.9.9" in await repo.list_passive_ips()
+    assert await repo.remove(DomainName("gone.com"))
+    assert "9.9.9.9" not in await repo.list_passive_ips()
+
+
+@pytest.mark.asyncio
+async def test_orphan_passive_not_exported(repo, tmp_path: Path):
+    bird_path = tmp_path / "routes.bird"
+    pipe = ResolvePipeline(
+        repository=repo,
+        resolver=FakeDns(),
+        exporter=StaticFileBirdExporter(
+            BirdSettings(include_path=str(bird_path), birdc_enable=False)
+        ),
+        clock=FixedClock(datetime(2026, 1, 1, tzinfo=timezone.utc)),
+        refresh=RefreshSettings(),
+        export_path=str(bird_path),
+        export_min_interval=0,
+    )
+    await repo.add(Domain.create("keep.com", source="manual"))
+    await repo.upsert_passive_hit(
+        "1.1.1.1", "keep.com", seen_at=datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    await repo.upsert_passive_hit(
+        "2.2.2.2", "orphan.com", seen_at=datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    await pipe.export_routes()
+    text = bird_path.read_text()
+    assert "1.1.1.1/32" in text
+    assert "2.2.2.2/32" not in text
+    assert await repo.purge_orphan_passive_hits() == 1
+    assert "2.2.2.2" not in await repo.list_passive_ips()
+
+
+@pytest.mark.asyncio
+async def test_passive_direct_policy_excluded_from_announce(repo, tmp_path: Path):
+    bird_path = tmp_path / "routes.bird"
+    pipe = ResolvePipeline(
+        repository=repo,
+        resolver=FakeDns(),
+        exporter=StaticFileBirdExporter(
+            BirdSettings(include_path=str(bird_path), birdc_enable=False)
+        ),
+        clock=FixedClock(datetime(2026, 1, 1, tzinfo=timezone.utc)),
+        refresh=RefreshSettings(),
+        export_path=str(bird_path),
+        export_min_interval=0,
+    )
+    await repo.add(Domain.create("direct.com", source="manual", route_policy="direct"))
+    await repo.upsert_passive_hit(
+        "3.3.3.3", "direct.com", seen_at=datetime(2026, 1, 1, tzinfo=timezone.utc)
+    )
+    await pipe.export_routes()
+    text = bird_path.read_text()
+    assert "3.3.3.3/32" not in text
+
+
+@pytest.mark.asyncio
 async def test_static_prefix_export(repo, tmp_path: Path):
     bird_path = tmp_path / "routes.bird"
     pipe = ResolvePipeline(
@@ -123,8 +194,9 @@ async def test_passive_hit_export(repo, tmp_path: Path):
         export_path=str(bird_path),
         export_min_interval=0,
     )
+    await repo.add(Domain.create("*.blocked.com", source="manual"))
     idx = DomainIndex()
-    idx.rebuild({"blocked.com"})
+    idx.rebuild(rules=[("blocked.com", "suffix", "announce")])
     collector = PassiveDnsCollector(idx, pipe)
     await collector.on_response("cdn.blocked.com", ["1.2.3.4"])
     await pipe.flush_pending_export()
